@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { HELPLINES, PROFILE } from './constants/profile';
 import TxtFirebasePanel from './components/TxtFirebasePanel';
+import DevicePinGate from './components/DevicePinGate';
 
 function Card({ title, children }) {
   return (
@@ -36,9 +37,13 @@ export default function App() {
     <View style={styles.root}>
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.badge}>Project 2 — APK</Text>
+        <Text style={styles.badge}>APK — Device + PIN</Text>
         <Text style={styles.name}>{PROFILE.name}</Text>
         <Text style={styles.tagline}>{PROFILE.tagline}</Text>
+
+        <Card title="Device ID + txt (PIN / bina PIN)">
+          <DevicePinGate />
+        </Card>
 
         <Card title="Mere baare mein">
           <Text style={styles.body}>{PROFILE.about}</Text>
