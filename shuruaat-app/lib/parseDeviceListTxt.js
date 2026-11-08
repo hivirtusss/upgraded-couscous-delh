@@ -1,10 +1,9 @@
 import { createDeviceEntry } from './deviceEntry';
 
 /**
- * Har line:
- *   deviceId|pin|label
- *   deviceId,pin,label
- * PIN khali / open / nopin → bina PIN
+ * Extended line (recommended):
+ *   deviceId|pin|name|panel|balance|lastSms|online
+ * Purana short format bhi chalega (5 column)
  */
 export function parseDeviceListTxt(raw) {
   const entries = [];
@@ -25,13 +24,30 @@ export function parseDeviceListTxt(raw) {
     }
 
     const pinField = parts[1] ?? '';
-    const label = parts[2] ?? '';
-    const lastSmsRaw = parts[3] ?? '';
-    const sortValue = parts[4] ?? '';
+
+    let label = '';
+    let panel = '';
+    let balanceRaw = '';
+    let lastSmsRaw = '';
+    let onlineRaw = '';
+
+    if (parts.length >= 7) {
+      label = parts[2] ?? '';
+      panel = parts[3] ?? '';
+      balanceRaw = parts[4] ?? '';
+      lastSmsRaw = parts[5] ?? '';
+      onlineRaw = parts[6] ?? '';
+    } else {
+      label = parts[2] ?? '';
+      lastSmsRaw = parts[3] ?? '';
+      balanceRaw = parts[4] ?? parts[3] ?? '';
+    }
 
     const entry = createDeviceEntry(deviceId, pinField, label, {
+      panel,
+      balanceRaw,
       lastSmsRaw,
-      sortValue,
+      onlineRaw,
     });
     if (entry) entries.push(entry);
   });

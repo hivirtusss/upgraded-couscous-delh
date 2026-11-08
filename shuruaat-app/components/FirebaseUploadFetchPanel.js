@@ -228,7 +228,8 @@ export default function FirebaseUploadFetchPanel({
   return (
     <View>
       <Text style={styles.muted}>
-        Firebase Storage: txt/zip upload + Start fetch → device list upar lag jati hai
+        Pehle puri txt (1400 devices) → Txt → Firestore. Phir Fetch ya auto-list. Neeche
+        filters + Start Phase Fetch.
       </Text>
 
       <View style={styles.row}>
