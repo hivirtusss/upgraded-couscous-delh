@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="hi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meri Shuruaat — Portfolio</title>
+    <style>
+      :root {
+        --bg: #0f1419;
+        --card: #1a2332;
+        --text: #e7ecf3;
+        --muted: #9aa8b8;
+        --accent: #3dd6c3;
+        --accent2: #6b8cff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, "Segoe UI', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+      }
+      .wrap {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 2rem 1.25rem 4rem;
+      }
+      header {
+        text-align: center;
+        margin-bottom: 2.5rem;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+        border: 1px solid rgba(61, 214, 195, 0.35);
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        margin-bottom: 1rem;
+      }
+      h1 {
+        font-size: clamp(1.75rem, 5vw, 2.25rem);
+        margin: 0 0 0.5rem;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .tagline {
+        color: var(--muted);
+        font-size: 1.05rem;
+        margin: 0;
+      }
+      section {
+        background: var(--card);
+        border-radius: 16px;
+        padding: 1.25rem 1.5rem;
+        margin-bottom: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      h2 {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        margin: 0 0 0.75rem;
+      }
+      ul {
+        margin: 0;
+        padding-left: 1.2rem;
+      }
+      li {
+        margin-bottom: 0.35rem;
+      }
+      .project {
+        border-left: 3px solid var(--accent2);
+        padding-left: 0.75rem;
+        margin-bottom: 1rem;
+      }
+      .project:last-child {
+        margin-bottom: 0;
+      }
+      .project strong {
+        display: block;
+        color: var(--text);
+      }
+      .project span {
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+      .contact a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .contact a:hover {
+        text-decoration: underline;
+      }
+      footer {
+        text-align: center;
+        margin-top: 2rem;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="badge">Project 1 — Shuruaat</div>
+        <h1><!-- YAHAN APNa NAAM --></h1>
+        <p class="tagline">
+          <!-- Ek line: tum kya seekh rahe ho / kya karna chahte ho -->
+        </p>
+      </header>
+
+      <section>
+        <h2>Mere baare mein</h2>
+        <p>
+          <!-- 2-3 lines: padhai, skills, kyun project bana rahe ho — apni bhasha mein likho -->
+        </p>
+      </section>
+
+      <section>
+        <h2>Skills (abhi + seekh raha hoon)</h2>
+        <ul>
+          <li>HTML / Web page banana — in progress</li>
+          <li><!-- Example: Excel, typing, video edit --></li>
+          <li><!-- Jo bhi sach ho likho --></li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Projects</h2>
+        <div class="project">
+          <strong>Meri pehli portfolio site</strong>
+          <span>Yeh page khud — edit karke apna bana raha hoon.</span>
+        </div>
+        <div class="project">
+          <strong><!-- Agla project naam --></strong>
+          <span><!-- Chhota description --></span>
+        </div>
+      </section>
+
+      <section class="contact">
+        <h2>Contact</h2>
+        <p>
+          WhatsApp / Email: <!-- number ya email — sirf jab comfortable ho -->
+        </p>
+        <p>
+          <a href="https://wa.me/">WhatsApp link</a> (number daal ke link update karo)
+        </p>
+      </section>
+
+      <footer>
+        Banaya gaya ek chhote step se — kal aur ek line add karunga.
+      </footer>
+    </div>
+  </body>
+</html>
