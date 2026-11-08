@@ -35,7 +35,15 @@ function HelplineButton({ label, number }) {
 }
 
 export default function App() {
-  const [deviceTxtFromFirebase, setDeviceTxtFromFirebase] = useState(null);
+  const [deviceListInject, setDeviceListInject] = useState(null);
+
+  function onDeviceTxtReady(payload) {
+    setDeviceListInject(payload);
+  }
+
+  function onDeviceEntriesReady(payload) {
+    setDeviceListInject(payload);
+  }
 
   return (
     <View style={styles.root}>
@@ -46,11 +54,14 @@ export default function App() {
         <Text style={styles.tagline}>{PROFILE.tagline}</Text>
 
         <Card title="Firebase — txt / zip upload + fetch">
-          <FirebaseUploadFetchPanel onDeviceTxtReady={setDeviceTxtFromFirebase} />
+          <FirebaseUploadFetchPanel
+            onDeviceTxtReady={onDeviceTxtReady}
+            onDeviceEntriesReady={onDeviceEntriesReady}
+          />
         </Card>
 
         <Card title="Device ID + txt (PIN / bina PIN)">
-          <DevicePinGate injectedList={deviceTxtFromFirebase} />
+          <DevicePinGate injectedList={deviceListInject} />
         </Card>
 
         <Card title="Mere baare mein">

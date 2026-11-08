@@ -30,6 +30,11 @@ export function isFirebaseReady() {
   return storage != null && firestore != null;
 }
 
+export function getFirestoreInstance() {
+  if (!firestore) throw new Error('Firebase not configured — config txt kholo');
+  return firestore;
+}
+
 function requireStorage() {
   if (!storage) throw new Error('Firebase not configured — config txt kholo');
   return storage;

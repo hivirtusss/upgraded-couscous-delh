@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Pressable,
   StyleSheet,
   Text,
@@ -57,56 +58,96 @@ export default function DevicePinGate({ injectedList }) {
     [entries, filter],
   );
 
-  const applyRawList = useCallback(
-    async (raw, name) => {
-      try {
-        setBusy(true);
-        setStatus('');
-        setAccess('idle');
+  const countWithPin = useMemo(
+    () => filterEntries(entries, 'with_pin').length,
+    [entries],
+  );
+  const countWithoutPin = useMemo(
+    () => filterEntries(entries, 'without_pin').length,
+    [entries],
+  );
+
+  const runAccessCheck = useCallback(
+    async (list, name, warn) => {
+      setEntries(list);
+      setListName(name);
+
+      const id = deviceId || (await fetchDeviceId());
+      setDeviceId(id);
+
+      if (warn) {
+        setStatus(warn);
+      } else {
+        setStatus(`Loaded ${list.length} devices`);
+      }
+
+      const match = findEntryForDevice(list, id);
+      if (!match) {
+        setAccess('denied');
         setMyEntry(null);
-        setPinInput('');
-
-        const parsed = parseDeviceListTxt(raw);
-        setEntries(parsed.entries);
-        setListName(name);
-
-        const id = deviceId || (await fetchDeviceId());
-        setDeviceId(id);
-
-        if (parsed.errors.length) {
-          setStatus(`Warning: ${parsed.errors[0]}`);
-        } else {
-          setStatus(`Loaded ${parsed.entries.length} devices`);
-        }
-
-        const match = findEntryForDevice(parsed.entries, id);
-        if (!match) {
-          setAccess('denied');
-          setMyEntry(null);
-          setStatus('Tumhari device ID list mein nahi mili');
-          return;
-        }
-        setMyEntry(match);
-        if (match.requiresPin) {
-          setAccess('need_pin');
-          setStatus('PIN chahiye — neeche daalo');
-        } else {
-          setAccess('allowed');
-          setStatus('Bina PIN — access OK');
-        }
-      } finally {
-        setBusy(false);
+        setStatus(`${list.length} devices — tumhari ID list mein nahi`);
+        return;
+      }
+      setMyEntry(match);
+      if (match.requiresPin) {
+        setAccess('need_pin');
+        setStatus(`PIN chahiye (${list.length} devices loaded)`);
+      } else {
+        setAccess('allowed');
+        setStatus(`Bina PIN OK (${list.length} total)`);
       }
     },
     [deviceId],
   );
 
+  const applyEntriesList = useCallback(
+    async (list, name) => {
+      try {
+        setBusy(true);
+        setAccess('idle');
+        setMyEntry(null);
+        setPinInput('');
+        await runAccessCheck(list, name, null);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [runAccessCheck],
+  );
+
+  const applyRawList = useCallback(
+    async (raw, name) => {
+      try {
+        setBusy(true);
+        setAccess('idle');
+        setMyEntry(null);
+        setPinInput('');
+
+        const parsed = parseDeviceListTxt(raw);
+        const warn = parsed.errors.length ? `Warning: ${parsed.errors[0]}` : null;
+        await runAccessCheck(parsed.entries, name, warn);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [runAccessCheck],
+  );
+
   useEffect(() => {
-    if (!injectedList?.raw) return;
-    applyRawList(injectedList.raw, injectedList.name || 'Firebase').catch((e) => {
-      setStatus(e.message || 'Firebase list fail');
-    });
-  }, [injectedList, applyRawList]);
+    if (!injectedList) return;
+    if (injectedList.entries?.length) {
+      applyEntriesList(
+        injectedList.entries,
+        injectedList.name || 'Firestore',
+      ).catch((e) => setStatus(e.message || 'List fail'));
+      return;
+    }
+    if (injectedList.raw) {
+      applyRawList(injectedList.raw, injectedList.name || 'Firebase').catch((e) => {
+        setStatus(e.message || 'Firebase list fail');
+      });
+    }
+  }, [injectedList, applyRawList, applyEntriesList]);
 
   async function loadDeviceTxt() {
     try {
@@ -215,28 +256,49 @@ export default function DevicePinGate({ injectedList }) {
             onPress={() => setFilter(f.key)}
           >
             <Text style={[styles.chipText, filter === f.key && styles.chipTextOn]}>
-              {f.label} ({filterEntries(entries, f.key).length})
+              {f.label} (
+              {f.key === 'all'
+                ? entries.length
+                : f.key === 'with_pin'
+                  ? countWithPin
+                  : countWithoutPin}
+              )
             </Text>
           </Pressable>
         ))}
       </View>
 
+      {entries.length > 0 ? (
+        <Text style={styles.statsLine}>
+          Total {entries.length} · Bina PIN {countWithoutPin} · PIN {countWithPin}
+        </Text>
+      ) : null}
+
       <View style={styles.listBox}>
         {filteredList.length === 0 ? (
-          <Text style={styles.muted}>Koi entry nahi (txt load karo)</Text>
+          <Text style={styles.muted}>Koi entry nahi — Firestore fetch / txt load</Text>
         ) : (
-          filteredList.map((e) => (
-            <View key={`${e.deviceId}-${e.label}`} style={styles.listRow}>
-              <Text style={styles.listId}>{e.deviceIdRaw}</Text>
-              <Text style={e.requiresPin ? styles.badgePin : styles.badgeOpen}>
-                {e.requiresPin ? `PIN •••` : 'OPEN'}
-              </Text>
-              {e.label ? <Text style={styles.listLabel}>{e.label}</Text> : null}
-              {e.deviceId === deviceId.trim().toLowerCase() ? (
-                <Text style={styles.thisDevice}>← yeh phone</Text>
-              ) : null}
-            </View>
-          ))
+          <FlatList
+            data={filteredList}
+            keyExtractor={(e) => `${e.deviceId}-${e.label}`}
+            style={styles.flatList}
+            nestedScrollEnabled
+            initialNumToRender={12}
+            maxToRenderPerBatch={24}
+            windowSize={8}
+            renderItem={({ item: e }) => (
+              <View style={styles.listRow}>
+                <Text style={styles.listId}>{e.deviceIdRaw}</Text>
+                <Text style={e.requiresPin ? styles.badgePin : styles.badgeOpen}>
+                  {e.requiresPin ? 'PIN •••' : 'OPEN'}
+                </Text>
+                {e.label ? <Text style={styles.listLabel}>{e.label}</Text> : null}
+                {e.deviceId === deviceId.trim().toLowerCase() ? (
+                  <Text style={styles.thisDevice}>← yeh phone</Text>
+                ) : null}
+              </View>
+            )}
+          />
         )}
       </View>
 
@@ -346,11 +408,19 @@ const styles = StyleSheet.create({
   },
   chipText: { color: '#9aa8b8', fontSize: 12 },
   chipTextOn: { color: '#3dd6c3' },
+  statsLine: {
+    color: '#9aa8b8',
+    fontSize: 12,
+    marginBottom: 6,
+  },
   listBox: {
     backgroundColor: '#0f1419',
     borderRadius: 12,
     padding: 10,
     marginBottom: 10,
+    maxHeight: 240,
+  },
+  flatList: {
     maxHeight: 220,
   },
   listRow: {

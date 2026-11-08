@@ -19,8 +19,13 @@ import {
   uploadUriToStorage,
 } from '../firebase/client';
 import { extractTxtFromZipBytes } from '../lib/zipTxt';
+import { fetchAllDevicesFromFirestore } from '../firebase/fetchDevices';
+import { FIRESTORE_DEVICES_COLLECTION } from '../constants/firebaseCollections';
 
-export default function FirebaseUploadFetchPanel({ onDeviceTxtReady }) {
+export default function FirebaseUploadFetchPanel({
+  onDeviceTxtReady,
+  onDeviceEntriesReady,
+}) {
   const [firebaseOk, setFirebaseOk] = useState(isFirebaseReady());
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
@@ -125,6 +130,25 @@ export default function FirebaseUploadFetchPanel({ onDeviceTxtReady }) {
     }
   }
 
+  async function fetchFirestoreDevices() {
+    try {
+      setBusy(true);
+      setStatus(`Firestore "${FIRESTORE_DEVICES_COLLECTION}" se fetch…`);
+      const entries = await fetchAllDevicesFromFirestore(({ loaded, page }) => {
+        setStatus(`Loading… ${loaded} devices (page ${page})`);
+      });
+      setStatus(`✓ ${entries.length} devices — filter neeche`);
+      onDeviceEntriesReady?.({
+        entries,
+        name: `Firestore ${entries.length}`,
+      });
+    } catch (e) {
+      setStatus(e.message || 'Firestore fetch fail');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startFetch() {
     try {
       setBusy(true);
@@ -184,10 +208,18 @@ export default function FirebaseUploadFetchPanel({ onDeviceTxtReady }) {
 
       <Pressable
         style={[styles.startBtn, (busy || !firebaseOk) && styles.btnDisabled]}
+        onPress={fetchFirestoreDevices}
+        disabled={busy || !firebaseOk}
+      >
+        <Text style={styles.startText}>▶ Fetch 1200+ devices (Firestore)</Text>
+      </Pressable>
+
+      <Pressable
+        style={[styles.startBtnSecondary, (busy || !firebaseOk) && styles.btnDisabled]}
         onPress={startFetch}
         disabled={busy || !firebaseOk}
       >
-        <Text style={styles.startText}>▶ Start fetch</Text>
+        <Text style={styles.startTextSecondary}>▶ Start fetch (Storage txt/zip)</Text>
       </Pressable>
 
       {txtFiles.length > 0 ? (
@@ -254,6 +286,20 @@ const styles = StyleSheet.create({
     borderColor: '#3dd6c3',
   },
   startText: { color: '#3dd6c3', fontWeight: '700', textAlign: 'center', fontSize: 16 },
+  startBtnSecondary: {
+    backgroundColor: '#243044',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#3a4555',
+  },
+  startTextSecondary: {
+    color: '#9aa8b8',
+    fontWeight: '600',
+    textAlign: 'center',
+    fontSize: 14,
+  },
   on: { color: '#3dd6c3', fontWeight: '700' },
   off: { color: '#9aa8b8' },
   section: {

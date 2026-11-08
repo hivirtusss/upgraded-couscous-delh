@@ -1,15 +1,4 @@
-const OPEN_PIN_VALUES = new Set(['', 'open', 'nopin', 'none', '0', '-']);
-
-function normalizePin(raw) {
-  if (raw == null) return '';
-  return String(raw).trim();
-}
-
-function pinRequiresAuth(pinField) {
-  const p = normalizePin(pinField);
-  if (!p) return false;
-  return !OPEN_PIN_VALUES.has(p.toLowerCase());
-}
+import { createDeviceEntry } from './deviceEntry';
 
 /**
  * Har line:
@@ -38,13 +27,8 @@ export function parseDeviceListTxt(raw) {
     const pinField = parts[1] ?? '';
     const label = parts[2] ?? '';
 
-    entries.push({
-      deviceId: deviceId.toLowerCase(),
-      deviceIdRaw: deviceId,
-      requiresPin: pinRequiresAuth(pinField),
-      pin: pinRequiresAuth(pinField) ? normalizePin(pinField) : '',
-      label,
-    });
+    const entry = createDeviceEntry(deviceId, pinField, label);
+    if (entry) entries.push(entry);
   });
 
   return { entries, errors };
