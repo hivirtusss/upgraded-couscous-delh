@@ -11,6 +11,12 @@
     },
     "android": {
       "package": "com.shuruaat.meriapp",
+      "usesCleartextTraffic": true,
+      "permissions": [
+        "INTERNET",
+        "READ_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#0f1419",
         "foregroundImage": "./assets/android-icon-foreground.png",

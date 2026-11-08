@@ -39,11 +39,14 @@ export default function App() {
         allowUniversalAccessFromFileURLs
         mixedContentMode="always"
         setSupportMultipleWindows={false}
+        thirdPartyCookiesEnabled
+        cacheEnabled
         onFileDownload={() => {}}
         {...(Platform.OS === 'android'
           ? {
               allowFileAccessFromFileURLs: true,
               geolocationEnabled: false,
+              nestedScrollEnabled: true,
             }
           : {})}
       />

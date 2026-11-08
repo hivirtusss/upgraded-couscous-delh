@@ -399,6 +399,34 @@
   .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #fff4; border-top-color: #fff; border-radius: 50%; animation: sp .6s linear infinite; vertical-align: middle; margin-right: 4px; }
   @keyframes sp { to { transform: rotate(360deg); } }
 
+  .connect-bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 8px 16px 12px; border-bottom: 1px solid var(--border);
+  }
+  .connect-bar input {
+    flex: 1 1 140px; min-width: 0; padding: 9px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    font-size: 0.78rem; font-family: inherit;
+  }
+  .connect-bar input::placeholder { color: var(--muted); }
+  .paste-backdrop {
+    position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.72);
+    display: none; align-items: center; justify-content: center; padding: 16px;
+  }
+  .paste-backdrop.show { display: flex; }
+  .paste-box {
+    width: min(100%, 520px); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .paste-box h3 { font-size: 0.95rem; margin-bottom: 8px; }
+  .paste-box p { font-size: 0.72rem; color: var(--muted); margin-bottom: 10px; line-height: 1.45; }
+  .paste-box textarea {
+    width: 100%; min-height: 160px; max-height: 50vh; padding: 10px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    font-size: 0.75rem; font-family: ui-monospace, monospace; resize: vertical;
+  }
+  .paste-actions { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; flex-wrap: wrap; }
+
   @media(max-width:480px) {
     .stats { grid-template-columns: repeat(3, 1fr); }
     .drow-body { font-size: 0.76rem; }
@@ -419,6 +447,25 @@
     <label class="btn" style="cursor:pointer">📂 TXT<input type="file" id="fileInput" accept=".txt" hidden></label>
     <button class="btn btn-fire" id="fetchBtn">⚡ Fetch Live</button>
     <span id="panelCount" style="color:var(--muted);font-size:0.75rem">0 panels</span>
+  </div>
+</div>
+
+<div class="connect-bar">
+  <input id="manualUrl" type="url" inputmode="url" placeholder="Firebase URL (ek panel jaise HTML mein)" autocomplete="off">
+  <input id="manualKey" type="text" placeholder="Auth / Database Secret" autocomplete="off">
+  <button type="button" class="btn" id="manualAddBtn">+ Panel</button>
+  <button type="button" class="btn" id="pasteTxtBtn">📋 Paste bulk TXT</button>
+</div>
+
+<div class="paste-backdrop" id="pasteBackdrop" aria-hidden="true">
+  <div class="paste-box">
+    <h3>Bulk TXT — saari Firebase panels</h3>
+    <p>Har panel: URL + Auth key (alag line ya comma / pipe). APK par file picker na chale to yahan paste karo.</p>
+    <textarea id="pasteArea" placeholder="https://project.firebaseio.com&#10;your-database-secret&#10;..."></textarea>
+    <div class="paste-actions">
+      <button type="button" class="btn" id="pasteCancelBtn">Cancel</button>
+      <button type="button" class="btn btn-fire" id="pasteLoadBtn">Load panels</button>
+    </div>
   </div>
 </div>
 
@@ -878,32 +925,74 @@ async function firebaseGet(baseUrl, key, path, extra = {}, ms = 8000, parentSign
   } catch (e) { clearTimeout(t); throw e; }
 }
 
+function registerPanel(map, url, key) {
+  if (!url || !key) return;
+  url = url.trim().replace(/[",\]\)]+$/, '').replace(/\/$/, '');
+  key = key.trim();
+  if (!url.includes('firebaseio.com') && !url.includes('firebasedatabase.app')) return;
+  const k = url.toLowerCase();
+  if (!map.has(k)) map.set(k, { url, key, name: panelName(url) });
+}
+
 function parseTxtCredentials(content) {
   const map = new Map();
-  const lines = content.split(/\r?\n/);
+  const text = String(content || '');
+  const pairRe = /(https:\/\/[^\s,'"<>]+(?:firebaseio\.com|firebasedatabase\.app)[^\s,'"<>]*)\s*[,|;\t]\s*([A-Za-z0-9_\-./+=]{8,})/gi;
+  let pm;
+  while ((pm = pairRe.exec(text)) !== null) registerPanel(map, pm[1], pm[2]);
+  const authInUrl = /(https:\/\/[^\s]+\.(?:firebaseio\.com|firebasedatabase\.app)[^\s]*)\?[^ \n]*auth=([^&\s'"<>]+)/gi;
+  while ((pm = authInUrl.exec(text)) !== null) registerPanel(map, pm[1], pm[2]);
+
+  const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     let t = lines[i].trim();
-  if (!t || t.startsWith('#')) continue;
+    if (!t || t.startsWith('#')) continue;
     const urlMatch = t.match(/(https:\/\/[^\s,'"<>]+(?:firebaseio\.com|firebasedatabase\.app)[^\s,'"<>]*)/i);
     if (!urlMatch) continue;
-    const url = urlMatch[1].replace(/[",\]\)]+$/, '').replace(/\/$/, '');
+    const url = urlMatch[1];
     let key = null;
-    const keyOnLine = t.match(/(?:auth\s*key|secret|🔑|key)\s*[:=]\s*['"]?([A-Za-z0-9_\-./+=]+)/i);
+    const keyOnLine = t.match(/(?:auth\s*key|secret|database\s*secret|🔑|key)\s*[:=]\s*['"]?([A-Za-z0-9_\-./+=]+)/i);
     if (keyOnLine) key = keyOnLine[1];
+    const afterUrl = t.slice(urlMatch.index + urlMatch[0].length);
+    const inlineKey = afterUrl.match(/[,|;\s]+([A-Za-z0-9_\-./+=]{12,})/);
+    if (!key && inlineKey && !inlineKey[1].includes('firebase')) key = inlineKey[1];
     if (!key) {
-      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+      for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
         const n = lines[j].trim();
         if (/https:\/\//i.test(n)) break;
-        const km = n.match(/(?:auth\s*key|secret|🔑|key)\s*[:=]\s*['"]?([A-Za-z0-9_\-./+=]+)/i);
+        const km = n.match(/(?:auth\s*key|secret|database\s*secret|🔑|key)\s*[:=]\s*['"]?([A-Za-z0-9_\-./+=]+)/i);
         if (km) { key = km[1]; break; }
-        if (/^[A-Za-z0-9_\-./+=]{12,}$/.test(n) && !n.includes('firebase')) { key = n; break; }
+        if (/^[A-Za-z0-9_\-./+=]{8,}$/.test(n) && !n.includes('firebase') && !n.startsWith('http')) { key = n; break; }
       }
     }
-    if (!key) continue;
-    const k = url.toLowerCase();
-    if (!map.has(k)) map.set(k, { url, key, name: panelName(url) });
+    registerPanel(map, url, key);
   }
   return [...map.values()];
+}
+
+function loadPanelsFromText(content, append = false) {
+  const found = parseTxtCredentials(content);
+  if (!found.length) {
+    if (!append) setStatus('Valid Firebase URL + Auth Key nahi mila', 'err');
+    else toast('Koi naya panel nahi mila');
+    return 0;
+  }
+  if (append) {
+    const merge = new Map(panels.map(p => [p.url.toLowerCase(), p]));
+    for (const p of found) {
+      const k = p.url.toLowerCase();
+      if (!merge.has(k)) merge.set(k, p);
+    }
+    panels = [...merge.values()];
+  } else {
+    panels = found;
+    allDevices = [];
+    render();
+  }
+  document.getElementById('panelCount').textContent = panels.length + ' panels';
+  setStatus(`✅ ${panels.length} panels ready — ⚡ Fetch Live dabao`, 'ok');
+  toast((append ? '+' : '') + found.length + ' panel' + (found.length > 1 ? 's' : ''));
+  return found.length;
 }
 
 function panelName(url) {
@@ -2173,15 +2262,41 @@ function toast(msg) {
 document.getElementById('fileInput').addEventListener('change', e => {
   if (!e.target.files[0]) return;
   const r = new FileReader();
-  r.onload = ev => {
-    panels = parseTxtCredentials(ev.target.result);
-    document.getElementById('panelCount').textContent = panels.length + ' panels';
-    if (!panels.length) { setStatus('Valid Firebase + Key nahi mila', 'err'); return; }
-    setStatus(`✅ ${panels.length} panels ready`, 'ok');
-    toast(panels.length + ' panels loaded');
-    allDevices = []; render();
-  };
+  r.onload = ev => loadPanelsFromText(ev.target.result, false);
   r.readAsText(e.target.files[0]);
+  e.target.value = '';
+});
+
+document.getElementById('manualAddBtn').addEventListener('click', () => {
+  const url = document.getElementById('manualUrl').value.trim();
+  const key = document.getElementById('manualKey').value.trim();
+  if (!url || !key) { toast('URL aur Auth key dono bhariye'); return; }
+  loadPanelsFromText(`${url}\n${key}`, true);
+  document.getElementById('manualUrl').value = '';
+  document.getElementById('manualKey').value = '';
+});
+
+const pasteBackdrop = document.getElementById('pasteBackdrop');
+document.getElementById('pasteTxtBtn').addEventListener('click', () => {
+  pasteBackdrop.classList.add('show');
+  pasteBackdrop.setAttribute('aria-hidden', 'false');
+});
+document.getElementById('pasteCancelBtn').addEventListener('click', () => {
+  pasteBackdrop.classList.remove('show');
+  pasteBackdrop.setAttribute('aria-hidden', 'true');
+});
+pasteBackdrop.addEventListener('click', ev => {
+  if (ev.target === pasteBackdrop) {
+    pasteBackdrop.classList.remove('show');
+    pasteBackdrop.setAttribute('aria-hidden', 'true');
+  }
+});
+document.getElementById('pasteLoadBtn').addEventListener('click', () => {
+  const n = loadPanelsFromText(document.getElementById('pasteArea').value, false);
+  if (n) {
+    pasteBackdrop.classList.remove('show');
+    pasteBackdrop.setAttribute('aria-hidden', 'true');
+  }
 });
 
 document.getElementById('fetchBtn').addEventListener('click', () => fetchAllPanels());
