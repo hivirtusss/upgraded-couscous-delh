@@ -1,0 +1,29 @@
+═══════════════════════════════════════
+  Firebase + TXT file — Hindi setup
+═══════════════════════════════════════
+
+1) Firebase (free)
+   - https://console.firebase.google.com
+   - "Add project" → naam daalo
+   - Build → Firestore Database → Create → Test mode (abhi learning ke liye)
+   - Project settings ⚙ → Your apps → Web (</>) → register
+   - Jo config dikhe, usko copy karke file banao:
+
+     config/firebase-config.example.txt ko copy karo
+     naam: firebase-config.txt
+     phone par bhi same format ki .txt rakh sakte ho
+
+2) App mein kaise use
+   - "Sample txt" → welcome.txt khulegi
+   - "Txt kholo" → phone se koi .txt choose
+   - "Firebase config txt" → apni firebase-config.txt kholo → ON dikhega
+   - Note likho → "Save Firebase"
+   - "Load Firebase" → wapas padho
+
+3) Firestore rule (baad mein secure karna)
+   Test mode 30 din — phir rules likhna seekhna.
+
+4) APK
+   APK-BANAO.md dekho — pehle Expo Go se test, phir eas build.
+
+Firebase keys kabhi GitHub par public mat daalo!

@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { HELPLINES, PROFILE } from './constants/profile';
+import TxtFirebasePanel from './components/TxtFirebasePanel';
 
 function Card({ title, children }) {
   return (
@@ -55,6 +56,10 @@ export default function App() {
           <Text style={styles.body}>
             Meri pehli Android app — portfolio + madad ke numbers save.
           </Text>
+        </Card>
+
+        <Card title="Txt file + Firebase">
+          <TxtFirebasePanel />
         </Card>
 
         <Card title="Jab bahut bura lage (call)">
