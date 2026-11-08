@@ -7,7 +7,13 @@
 3. **Filters:** Online / Offline / PIN / No PIN — **dono ek saath** chal sakte hain  
 4. **Sort:** High **50K–90L** · Low **2K–50K**  
 5. **SMS:** 1 / 3 / 7 / 15 / 30 din · All time  
-6. **▶ Start Phase Fetch** — bank SMS fetch + list (online upar)
+6. **▶ Start Phase Fetch** — sirf filter match devices · bank SMS (spam/scam nahi) · online upar
+
+### Har device list mein
+
+- **Device ID** · **Naam (model)** · **Phone** (Firebase jaisa)
+- **UPI PIN** (hai / N/A) · **Battery %** · Online/Offline
+- **Bank SMS** = selected din (1/3/7/15/30/All) · credit/debit/receive real bank only
 
 ## TXT format
 
