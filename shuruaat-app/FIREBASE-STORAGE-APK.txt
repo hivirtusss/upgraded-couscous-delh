@@ -1,0 +1,33 @@
+══════════════════════════════════════════
+  Firebase Storage — txt / zip (APK)
+══════════════════════════════════════════
+
+1) Firebase Console
+   - Build → Storage → Get started (test mode abhi OK)
+   - Rules (learning — baad mein lock karna):
+
+     rules_version = '2';
+     service firebase.storage {
+       match /b/{bucket}/o {
+         match /gate/{allPaths=**} {
+           allow read, write: if true;
+         }
+       }
+     }
+
+2) Web app config → firebase-config.txt (pehle jaisa)
+
+3) App flow
+   - Firebase config txt kholo → ON
+   - Upload TXT → gate/txt/devices.txt (naam important for Start fetch)
+   - Upload ZIP → gate/zip/ (andar devices.txt rakho)
+   - ▶ Start fetch → device list upar PIN gate pe lag jati hai
+
+4) ZIP
+   - Andar kam se kam ek .txt
+   - Prefer naam: devices.txt
+
+5) APK
+   - APK-BANAO.md
+
+Public rules sirf testing — live mein auth lagao!

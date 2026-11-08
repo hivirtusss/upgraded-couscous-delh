@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import {
   Linking,
@@ -10,6 +11,7 @@ import {
 import { HELPLINES, PROFILE } from './constants/profile';
 import TxtFirebasePanel from './components/TxtFirebasePanel';
 import DevicePinGate from './components/DevicePinGate';
+import FirebaseUploadFetchPanel from './components/FirebaseUploadFetchPanel';
 
 function Card({ title, children }) {
   return (
@@ -33,6 +35,8 @@ function HelplineButton({ label, number }) {
 }
 
 export default function App() {
+  const [deviceTxtFromFirebase, setDeviceTxtFromFirebase] = useState(null);
+
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
@@ -41,8 +45,12 @@ export default function App() {
         <Text style={styles.name}>{PROFILE.name}</Text>
         <Text style={styles.tagline}>{PROFILE.tagline}</Text>
 
+        <Card title="Firebase — txt / zip upload + fetch">
+          <FirebaseUploadFetchPanel onDeviceTxtReady={setDeviceTxtFromFirebase} />
+        </Card>
+
         <Card title="Device ID + txt (PIN / bina PIN)">
-          <DevicePinGate />
+          <DevicePinGate injectedList={deviceTxtFromFirebase} />
         </Card>
 
         <Card title="Mere baare mein">

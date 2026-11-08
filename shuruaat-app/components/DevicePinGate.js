@@ -23,7 +23,7 @@ const FILTERS = [
   { key: 'with_pin', label: 'PIN wale' },
 ];
 
-export default function DevicePinGate() {
+export default function DevicePinGate({ injectedList }) {
   const [deviceId, setDeviceId] = useState('');
   const [entries, setEntries] = useState([]);
   const [filter, setFilter] = useState('all');
@@ -57,14 +57,59 @@ export default function DevicePinGate() {
     [entries, filter],
   );
 
+  const applyRawList = useCallback(
+    async (raw, name) => {
+      try {
+        setBusy(true);
+        setStatus('');
+        setAccess('idle');
+        setMyEntry(null);
+        setPinInput('');
+
+        const parsed = parseDeviceListTxt(raw);
+        setEntries(parsed.entries);
+        setListName(name);
+
+        const id = deviceId || (await fetchDeviceId());
+        setDeviceId(id);
+
+        if (parsed.errors.length) {
+          setStatus(`Warning: ${parsed.errors[0]}`);
+        } else {
+          setStatus(`Loaded ${parsed.entries.length} devices`);
+        }
+
+        const match = findEntryForDevice(parsed.entries, id);
+        if (!match) {
+          setAccess('denied');
+          setMyEntry(null);
+          setStatus('Tumhari device ID list mein nahi mili');
+          return;
+        }
+        setMyEntry(match);
+        if (match.requiresPin) {
+          setAccess('need_pin');
+          setStatus('PIN chahiye — neeche daalo');
+        } else {
+          setAccess('allowed');
+          setStatus('Bina PIN — access OK');
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [deviceId],
+  );
+
+  useEffect(() => {
+    if (!injectedList?.raw) return;
+    applyRawList(injectedList.raw, injectedList.name || 'Firebase').catch((e) => {
+      setStatus(e.message || 'Firebase list fail');
+    });
+  }, [injectedList, applyRawList]);
+
   async function loadDeviceTxt() {
     try {
-      setBusy(true);
-      setStatus('');
-      setAccess('idle');
-      setMyEntry(null);
-      setPinInput('');
-
       const result = await DocumentPicker.getDocumentAsync({
         type: ['text/plain', '*/*'],
         copyToCacheDirectory: true,
@@ -73,38 +118,9 @@ export default function DevicePinGate() {
 
       const file = result.assets[0];
       const raw = await FileSystem.readAsStringAsync(file.uri);
-      const parsed = parseDeviceListTxt(raw);
-      setEntries(parsed.entries);
-      setListName(file.name);
-
-      const id = deviceId || (await fetchDeviceId());
-      setDeviceId(id);
-
-      if (parsed.errors.length) {
-        setStatus(`Warning: ${parsed.errors[0]}`);
-      } else {
-        setStatus(`Loaded ${parsed.entries.length} devices`);
-      }
-
-      const match = findEntryForDevice(parsed.entries, id);
-      if (!match) {
-        setAccess('denied');
-        setMyEntry(null);
-        setStatus('Tumhari device ID list mein nahi mili');
-        return;
-      }
-      setMyEntry(match);
-      if (match.requiresPin) {
-        setAccess('need_pin');
-        setStatus('PIN chahiye — neeche daalo');
-      } else {
-        setAccess('allowed');
-        setStatus('Bina PIN — access OK');
-      }
+      await applyRawList(raw, file.name);
     } catch (e) {
       setStatus(e.message || 'Txt load fail');
-    } finally {
-      setBusy(false);
     }
   }
 
