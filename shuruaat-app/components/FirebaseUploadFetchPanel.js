@@ -21,6 +21,8 @@ import {
 import { extractTxtFromZipBytes } from '../lib/zipTxt';
 import { fetchAllDevicesFromFirestore } from '../firebase/fetchDevices';
 import { FIRESTORE_DEVICES_COLLECTION } from '../constants/firebaseCollections';
+import { parseDeviceListTxt } from '../lib/parseDeviceListTxt';
+import { importEntriesToFirestore } from '../firebase/importDevices';
 
 export default function FirebaseUploadFetchPanel({
   onDeviceTxtReady,
@@ -78,6 +80,41 @@ export default function FirebaseUploadFetchPanel({
       await refreshLists();
     } catch (e) {
       setStatus(e.message || 'Upload txt fail');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Txt → Firestore devices (1200 lines) + Storage backup */
+  async function uploadTxtToFirestore() {
+    try {
+      setBusy(true);
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['text/plain', '*/*'],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+      const file = result.assets[0];
+      const raw = await FileSystem.readAsStringAsync(file.uri);
+      const parsed = parseDeviceListTxt(raw);
+      if (!parsed.entries.length) {
+        setStatus('Txt mein koi device nahi mili');
+        return;
+      }
+      setStatus(`Import… 0 / ${parsed.entries.length}`);
+      await importEntriesToFirestore(parsed.entries, ({ done, total }) => {
+        setStatus(`Firestore import… ${done} / ${total}`);
+      });
+      const path = `${STORAGE_PATHS.txtDir}/${file.name}`;
+      await uploadUriToStorage(file.uri, path, 'text/plain');
+      setStatus(`✓ ${parsed.entries.length} devices Firestore + Storage`);
+      onDeviceEntriesReady?.({
+        entries: parsed.entries,
+        name: file.name,
+      });
+      await refreshLists();
+    } catch (e) {
+      setStatus(e.message || 'Firestore import fail');
     } finally {
       setBusy(false);
     }
@@ -203,6 +240,7 @@ export default function FirebaseUploadFetchPanel({
 
       <View style={styles.row}>
         <Btn label="Upload TXT" onPress={uploadTxt} disabled={busy || !firebaseOk} />
+        <Btn label="Txt → Firestore" onPress={uploadTxtToFirestore} disabled={busy || !firebaseOk} />
         <Btn label="Upload ZIP" onPress={uploadZip} disabled={busy || !firebaseOk} />
       </View>
 

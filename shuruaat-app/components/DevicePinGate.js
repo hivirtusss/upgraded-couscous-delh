@@ -17,17 +17,16 @@ import {
   findEntryForDevice,
   parseDeviceListTxt,
 } from '../lib/parseDeviceListTxt';
-
-const FILTERS = [
-  { key: 'all', label: 'Sab' },
-  { key: 'without_pin', label: 'Bina PIN' },
-  { key: 'with_pin', label: 'PIN wale' },
-];
+import { buildFilteredDeviceList } from '../lib/deviceFilters';
+import { formatSmsAge } from '../lib/parseSmsTime';
+import DeviceFilterToolbar from './DeviceFilterToolbar';
 
 export default function DevicePinGate({ injectedList }) {
   const [deviceId, setDeviceId] = useState('');
   const [entries, setEntries] = useState([]);
-  const [filter, setFilter] = useState('all');
+  const [sortOrder, setSortOrder] = useState('high_to_low');
+  const [pinMode, setPinMode] = useState('all');
+  const [smsAgeKey, setSmsAgeKey] = useState('all');
   const [listName, setListName] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -54,8 +53,13 @@ export default function DevicePinGate({ injectedList }) {
   }, [loadDeviceId]);
 
   const filteredList = useMemo(
-    () => filterEntries(entries, filter),
-    [entries, filter],
+    () =>
+      buildFilteredDeviceList(entries, {
+        pinMode,
+        smsAgeKey,
+        sortOrder,
+      }),
+    [entries, pinMode, smsAgeKey, sortOrder],
   );
 
   const countWithPin = useMemo(
@@ -247,26 +251,16 @@ export default function DevicePinGate({ injectedList }) {
         </View>
       ) : null}
 
-      <Text style={styles.sectionTitle}>Filter list</Text>
-      <View style={styles.row}>
-        {FILTERS.map((f) => (
-          <Pressable
-            key={f.key}
-            style={[styles.chip, filter === f.key && styles.chipOn]}
-            onPress={() => setFilter(f.key)}
-          >
-            <Text style={[styles.chipText, filter === f.key && styles.chipTextOn]}>
-              {f.label} (
-              {f.key === 'all'
-                ? entries.length
-                : f.key === 'with_pin'
-                  ? countWithPin
-                  : countWithoutPin}
-              )
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <DeviceFilterToolbar
+        sortOrder={sortOrder}
+        onSortOrder={setSortOrder}
+        pinMode={pinMode}
+        onPinMode={setPinMode}
+        smsAgeKey={smsAgeKey}
+        onSmsAgeKey={setSmsAgeKey}
+        shownCount={filteredList.length}
+        totalCount={entries.length}
+      />
 
       {entries.length > 0 ? (
         <Text style={styles.statsLine}>
@@ -293,6 +287,9 @@ export default function DevicePinGate({ injectedList }) {
                   {e.requiresPin ? 'PIN •••' : 'OPEN'}
                 </Text>
                 {e.label ? <Text style={styles.listLabel}>{e.label}</Text> : null}
+                <Text style={styles.smsMeta}>
+                  SMS: {formatSmsAge(e.lastSmsAt)} · Sort: {e.sortValue ?? 0}
+                </Text>
                 {e.deviceId === deviceId.trim().toLowerCase() ? (
                   <Text style={styles.thisDevice}>← yeh phone</Text>
                 ) : null}
@@ -430,6 +427,7 @@ const styles = StyleSheet.create({
   },
   listId: { color: '#e7ecf3', fontSize: 12, fontFamily: 'monospace' },
   listLabel: { color: '#9aa8b8', fontSize: 12, marginTop: 2 },
+  smsMeta: { color: '#6b7a8c', fontSize: 10, marginTop: 2 },
   badgePin: {
     alignSelf: 'flex-start',
     marginTop: 4,

@@ -26,8 +26,13 @@ export function parseDeviceListTxt(raw) {
 
     const pinField = parts[1] ?? '';
     const label = parts[2] ?? '';
+    const lastSmsRaw = parts[3] ?? '';
+    const sortValue = parts[4] ?? '';
 
-    const entry = createDeviceEntry(deviceId, pinField, label);
+    const entry = createDeviceEntry(deviceId, pinField, label, {
+      lastSmsRaw,
+      sortValue,
+    });
     if (entry) entries.push(entry);
   });
 
