@@ -2,7 +2,8 @@
 
 ## APK kya karta hai (reference jaisa)
 
-1. **📂 TXT** — Firebase Realtime DB credentials (URL + Auth Key), 1200+ panels ek file mein  
+1. **📂 TXT** ya **📋 Paste bulk TXT** — 1200+ panels ek saath (aapki single-panel HTML jaisa UI, lekin saari Firebase ek list mein)  
+   Ek panel add: URL + Auth + **+ Panel**  
 2. **⚡ Fetch Live** — saari panels se devices (`clients`)  
 3. **Filters:** Online / Offline / PIN / No PIN — **dono ek saath** chal sakte hain  
 4. **Sort:** High **50K–90L** · Low **2K–50K**  
