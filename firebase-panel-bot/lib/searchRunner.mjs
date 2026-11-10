@@ -5,6 +5,7 @@ const TIERS = {
   low_high: { min: 2000, max: 50_000, label: 'BAL LOW->HIGH', sort: 'asc' },
   high_low: { min: 50_000, max: 9_000_000, label: 'BAL HIGH->LOW', sort: 'desc' },
   bank70k: { min: 70_000, max: 10_000_000, label: 'Bank 70K–1Cr', sort: 'desc' },
+  user30_90L: { min: 30_000, max: 9_000_000, label: 'BAL 30K–90L', sort: 'desc' },
 };
 
 export function parseSearchCommand(text) {
