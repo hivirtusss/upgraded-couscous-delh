@@ -51,9 +51,11 @@ bot.start(ctx => {
 
 bot.command('status', ctx => {
   const cached = USER_PANELS.get(ctx.from.id);
+  const withKey = globalPanels.filter(p => p.key).length;
   ctx.reply(
-    `Total tumhare panels: *${globalPanels.length}*\n` +
-      `Last fetch devices: ${cached?.devices?.length ?? 0}`,
+    `Total panels (A–Z): *${globalPanels.length}*\n` +
+      `Auth key wale: ${withKey} | Sirf URL: ${globalPanels.length - withKey}\n` +
+      `Last search/fetch devices: ${cached?.devices?.length ?? 0}`,
     { parse_mode: 'Markdown' }
   );
 });
