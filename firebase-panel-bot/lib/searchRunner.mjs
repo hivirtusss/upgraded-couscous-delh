@@ -2,8 +2,8 @@ import { fetchAllPanels, normalizeFirebaseUrl } from './panelCore.mjs';
 import { processBankMessages } from './bankSms.mjs';
 
 const TIERS = {
-  low_high: { min: 2000, max: 50_000, label: 'BAL LOW->HIGH', sort: 'asc' },
-  high_low: { min: 50_000, max: 9_000_000, label: 'BAL HIGH->LOW', sort: 'desc' },
+  low_high: { min: 2_000, max: 50_000, label: 'BAL LOW→HIGH (2K–50K)', sort: 'asc' },
+  high_low: { min: 30_000, max: 9_000_000, label: 'BAL HIGH→LOW (30K–90L)', sort: 'desc' },
   bank70k: { min: 70_000, max: 10_000_000, label: 'Bank 70K–1Cr', sort: 'desc' },
   user30_90L: { min: 30_000, max: 9_000_000, label: 'BAL 30K–90L', sort: 'desc' },
 };
@@ -151,7 +151,7 @@ export async function runSearch(panels, opts, onProgress) {
   const panelsHit = new Set();
 
   let devices = await fetchAllPanels(panels, {
-    batch: 35,
+    batch: 45,
     onProgress: (done, total, count) => {
       onProgress?.({ phase: 'panels', done, total, count });
     },
@@ -176,7 +176,10 @@ export async function runSearch(panels, opts, onProgress) {
           if (opts.avlBal && !r.maxBalance && !r.bankSms.some(m => /avl\s*bal/i.test(m.text))) return;
           const row = { ...d, bankSms: r.bankSms, maxBalance: r.maxBalance, maxTxn: r.maxTxn };
           const amt = row.maxBalance || row.maxTxn || 0;
-          if (opts.tier !== 'low_high' && amt > 0 && (amt < tier.min || amt > tier.max)) return;
+          if (amt > 0 && (amt < tier.min || amt > tier.max)) return;
+          if (amt === 0 && (opts.tier === 'high_low' || opts.tier === 'user30_90L' || opts.tier === 'bank70k')) {
+            return;
+          }
           results.push(row);
         } catch (_) {}
       })

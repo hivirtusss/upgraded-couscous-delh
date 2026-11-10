@@ -38,7 +38,7 @@ export function extractSearchKeywords(rest) {
 export function tierFromRest(rest, isBankHigh = false) {
   if (isBankHigh) return 'bank70k';
   const l = rest.toLowerCase();
-  if (l.includes('30-90l') || l.includes('30k')) return 'user30_90L';
+  if (l.includes('30-90l') || l.includes('30k')) return 'high_low';
   if (l.includes('high')) return 'high_low';
   return 'low_high';
 }
@@ -97,8 +97,8 @@ export function pinKeyboard() {
 export function sortKeyboard() {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback('💰 Low → High', 'sw|sort|low'),
-      Markup.button.callback('💰 High → Low', 'sw|sort|high'),
+      Markup.button.callback('💰 Low→High 2K–50K', 'sw|sort|low'),
+      Markup.button.callback('💰 High→Low 30K–90L', 'sw|sort|high'),
     ],
     [Markup.button.callback('▶ START SEARCH', 'sw|go|start')],
   ]);
@@ -119,4 +119,36 @@ export function pinLabel(pin) {
   if (pin === 'with') return 'With PIN';
   if (pin === 'without') return 'Without PIN';
   return 'Both (mix)';
+}
+
+export function sortLabel(sort) {
+  if (sort === 'high') return 'High→Low (30K–90L)';
+  return 'Low→High (2K–50K)';
+}
+
+/** Ek hi message update — nayi chat bar nahi */
+export function wizardMessage(w, step) {
+  const kw = (w.keywords || ['avl/bal', 'bank']).join(', ');
+  const lines = [`🔎 Search · *${kw}*`, `📂 Saari loaded Firebase scan`, ''];
+  if (w.status) lines.push(`✓ Status: ${statusLabel(w.status)}`);
+  if (w.days !== null && w.days !== undefined) lines.push(`✓ Days: ${dayLabel(w.days)}`);
+  if (w.pin) lines.push(`✓ PIN: ${pinLabel(w.pin)}`);
+  if (w.sort) lines.push(`✓ Sort: ${sortLabel(w.sort)}`);
+  lines.push('');
+  if (step === 1) lines.push('*Step 1/4* — Device status tap karo:');
+  else if (step === 2) lines.push('*Step 2/4* — Kitne din purane SMS?');
+  else if (step === 3) lines.push('*Step 3/4* — UPI PIN filter:');
+  else if (step === 4) lines.push('*Step 4/4* — Balance range + Start:');
+  return lines.join('\n');
+}
+
+export async function editWizardStep(ctx, w, step, keyboard) {
+  const text = wizardMessage(w, step);
+  const extra = keyboard();
+  try {
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', ...extra });
+  } catch {
+    const m = await ctx.reply(text, { parse_mode: 'Markdown', ...extra });
+    w.wizardMsgId = m.message_id;
+  }
 }

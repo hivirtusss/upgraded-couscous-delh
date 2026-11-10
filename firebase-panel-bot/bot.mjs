@@ -12,9 +12,8 @@ import {
   daysKeyboard,
   pinKeyboard,
   sortKeyboard,
-  dayLabel,
-  statusLabel,
-  pinLabel,
+  wizardMessage,
+  editWizardStep,
 } from './lib/searchWizard.mjs';
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -47,6 +46,11 @@ function savePanels(panels) {
 }
 
 let globalPanels = loadSavedPanels();
+
+function refreshPanelsFromDisk() {
+  globalPanels = loadSavedPanels();
+  return globalPanels.length;
+}
 
 const bot = new Telegraf(TOKEN);
 
@@ -123,15 +127,15 @@ function startSearchWizard(ctx, rest, isBankHigh = false) {
     pin: null,
     sort: null,
   });
-  const kw = keywords.join(', ');
-  return ctx.reply(
-    `🔎 Search setup\n📌 Keywords: *${kw}*\n\n*Step 1/4* — Device status choose karo:`,
-    { parse_mode: 'Markdown', ...statusKeyboard() }
-  );
+  return ctx.reply(wizardMessage({ keywords, tier: tierFromRest(rest, isBankHigh) }, 1), {
+    parse_mode: 'Markdown',
+    ...statusKeyboard(),
+  });
 }
 
 async function executeSearch(ctx, opts) {
-  if (!globalPanels.length) {
+  const panelCount = refreshPanelsFromDisk();
+  if (!panelCount) {
     return ctx.reply('Pehle `addtxt` se panels add karo.', { parse_mode: 'Markdown' });
   }
   const uid = ctx.from.id;
@@ -140,7 +144,9 @@ async function executeSearch(ctx, opts) {
   }
   SEARCH_ABORT.set(uid, 'running');
   const kw = (opts.keywords || ['avl/bal', 'bank']).join(', ');
-  const status = await ctx.reply(`⚡ Search start...\n📌 ${kw}`);
+  const status = await ctx.reply(`⚡ Scan *${globalPanels.length}* Firebase...\n📌 ${kw}`, {
+    parse_mode: 'Markdown',
+  });
 
   const abort = () => SEARCH_ABORT.get(uid) !== 'running';
   try {
@@ -216,67 +222,62 @@ bot.action(/^sw\|st\|(online|offline|both)$/, async ctx => {
   await ctx.answerCbQuery();
   const w = SEARCH_WIZARD.get(ctx.from.id);
   if (!w) {
-    return ctx.reply('Pehle `/search avl/bal, bank online` bhejo', { parse_mode: 'Markdown' });
+    return ctx.answerCbQuery('Pehle /search bhejo', { show_alert: true });
   }
   w.status = ctx.match[1];
   SEARCH_WIZARD.set(ctx.from.id, w);
-  await ctx.reply(
-    `✅ ${statusLabel(w.status)}\n\n*Step 2/4* — Kitne din purane SMS?`,
-    { parse_mode: 'Markdown', ...daysKeyboard() }
-  );
+  await editWizardStep(ctx, w, 2, daysKeyboard);
 });
 
 bot.action(/^sw\|day\|(\d+)$/, async ctx => {
   await ctx.answerCbQuery();
   const w = SEARCH_WIZARD.get(ctx.from.id);
-  if (!w?.status) return ctx.reply('Pehle Step 1 (Online/Offline) choose karo.');
+  if (!w?.status) {
+    return ctx.answerCbQuery('Step 1 pehle', { show_alert: true });
+  }
   w.days = parseInt(ctx.match[1], 10);
   SEARCH_WIZARD.set(ctx.from.id, w);
-  await ctx.reply(
-    `✅ ${dayLabel(w.days)}\n\n*Step 3/4* — UPI PIN filter:`,
-    { parse_mode: 'Markdown', ...pinKeyboard() }
-  );
+  await editWizardStep(ctx, w, 3, pinKeyboard);
 });
 
 bot.action(/^sw\|pin\|(with|without|both)$/, async ctx => {
   await ctx.answerCbQuery();
   const w = SEARCH_WIZARD.get(ctx.from.id);
   if (!w?.status || w.days === null || w.days === undefined) {
-    return ctx.reply('Pehle days choose karo.');
+    return ctx.answerCbQuery('Days choose karo', { show_alert: true });
   }
   w.pin = ctx.match[1];
   SEARCH_WIZARD.set(ctx.from.id, w);
-  await ctx.reply(
-    `✅ PIN: ${pinLabel(w.pin)}\n\n*Step 4/4* — Sort + Start:`,
-    { parse_mode: 'Markdown', ...sortKeyboard() }
-  );
+  await editWizardStep(ctx, w, 4, sortKeyboard);
 });
 
 bot.action(/^sw\|sort\|(low|high)$/, async ctx => {
   await ctx.answerCbQuery();
   const w = SEARCH_WIZARD.get(ctx.from.id);
-  if (!w?.pin) return ctx.reply('Pehle PIN step complete karo.');
+  if (!w?.pin) return ctx.answerCbQuery('PIN step', { show_alert: true });
   w.sort = ctx.match[1];
-  if (w.sort === 'high') w.tier = w.tier === 'bank70k' ? 'bank70k' : 'high_low';
-  else w.tier = 'low_high';
+  w.tier = w.sort === 'high' ? (w.tier === 'bank70k' ? 'bank70k' : 'high_low') : 'low_high';
   SEARCH_WIZARD.set(ctx.from.id, w);
-  const kw = w.keywords.join(', ');
-  await ctx.reply(
-    `Sort: ${w.sort === 'low' ? 'Low→High' : 'High→Low'}\n\n` +
-      `📋 ${kw} | ${statusLabel(w.status)} | ${dayLabel(w.days)} | ${pinLabel(w.pin)}\n` +
-      'Neeche *START SEARCH* dabao 👇',
-    { parse_mode: 'Markdown', ...sortKeyboard() }
-  );
+  await editWizardStep(ctx, w, 4, sortKeyboard);
 });
 
 bot.action(/^sw\|go\|start$/, async ctx => {
   await ctx.answerCbQuery('Search start...');
   const w = SEARCH_WIZARD.get(ctx.from.id);
   if (!w?.status || w.days === null || w.days === undefined || !w.pin) {
-    return ctx.reply('Poora wizard complete karo (status → days → PIN).');
+    return ctx.answerCbQuery('Status → Days → PIN complete karo', { show_alert: true });
+  }
+  if (!w.sort) {
+    w.sort = 'low';
+    w.tier = 'low_high';
   }
   if (w.sort === 'high' && w.tier !== 'bank70k') w.tier = 'high_low';
-  if (!w.sort) w.tier = w.tier || 'low_high';
+  try {
+    await ctx.editMessageText(
+      wizardMessage(w, 4) + '\n\n⚡ *Search start* — saari Firebase scan...',
+      { parse_mode: 'Markdown' }
+    );
+  } catch (_) {}
   await executeSearch(ctx, optsFromWizard(w));
 });
 
