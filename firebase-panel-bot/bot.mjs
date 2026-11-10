@@ -22,6 +22,7 @@ const PANELS_FILE = join(DATA_DIR, 'panels.json');
 const USER_PANELS = new Map();
 const SEARCH_ABORT = new Map();
 const SEARCH_WIZARD = new Map();
+let MONITOR_ENABLED = true;
 
 if (!TOKEN) {
   console.error('TELEGRAM_BOT_TOKEN missing. See BOT-START-HI.md');
@@ -60,6 +61,7 @@ bot.start(ctx => {
       '📩 .txt + caption `addtxt` / `/fb`\n' +
       '🔎 `/search` — menu\n' +
       '⚡ `/search avl/bal, bank online` → tap options\n' +
+      '⛔ `/stopmonitor` · ✅ `/startmonitor`\n' +
       '/status · /done',
     { parse_mode: 'Markdown' }
   );
@@ -133,14 +135,26 @@ function startSearchWizard(ctx, rest, isBankHigh = false) {
   });
 }
 
+function stopAllSearches() {
+  for (const [uid, st] of SEARCH_ABORT.entries()) {
+    if (st === 'running') SEARCH_ABORT.set(uid, 'stop');
+  }
+}
+
 async function executeSearch(ctx, opts) {
+  if (!MONITOR_ENABLED) {
+    return ctx.reply(
+      '⛔ *Monitoring STOP* hai.\n\n✅ Continue ke liye: `/startmonitor`',
+      { parse_mode: 'Markdown' }
+    );
+  }
   const panelCount = refreshPanelsFromDisk();
   if (!panelCount) {
     return ctx.reply('Pehle `addtxt` se panels add karo.', { parse_mode: 'Markdown' });
   }
   const uid = ctx.from.id;
   if (SEARCH_ABORT.get(uid) === 'running') {
-    return ctx.reply('Pehle /done bhejo ya wait karo.');
+    return ctx.reply('Pehle /done ya /stopmonitor bhejo.');
   }
   SEARCH_ABORT.set(uid, 'running');
   const kw = (opts.keywords || ['avl/bal', 'bank']).join(', ');
@@ -148,10 +162,13 @@ async function executeSearch(ctx, opts) {
     parse_mode: 'Markdown',
   });
 
-  const abort = () => SEARCH_ABORT.get(uid) !== 'running';
+  const abort = () => !MONITOR_ENABLED || SEARCH_ABORT.get(uid) !== 'running';
   try {
-    const out = await runSearch(globalPanels, opts, prog => {
-      if (abort()) return;
+    const out = await runSearch(
+      globalPanels,
+      opts,
+      prog => {
+        if (abort()) return;
       let msg = '⚡ Search...';
       if (prog.phase === 'panels') {
         msg = `📥 DBs ${prog.done}/${prog.total} · ${prog.count} devices`;
@@ -159,9 +176,22 @@ async function executeSearch(ctx, opts) {
         msg = `📌 SMS ${prog.done}/${prog.total} · matched ${prog.matched}`;
       }
       ctx.telegram.editMessageText(ctx.chat.id, status.message_id, undefined, msg).catch(() => {});
-    });
+      },
+      abort
+    );
 
     if (abort()) {
+      await ctx.telegram
+        .editMessageText(ctx.chat.id, status.message_id, undefined, '⛔ Monitoring STOP — scan ruk gayi.')
+        .catch(() => {});
+      SEARCH_ABORT.delete(uid);
+      return;
+    }
+
+    if (out.aborted) {
+      await ctx.telegram
+        .editMessageText(ctx.chat.id, status.message_id, undefined, '⛔ Scan cancel.')
+        .catch(() => {});
       SEARCH_ABORT.delete(uid);
       return;
     }
@@ -195,11 +225,32 @@ async function executeSearch(ctx, opts) {
   }
 }
 
+bot.command('stopmonitor', ctx => {
+  MONITOR_ENABLED = false;
+  stopAllSearches();
+  ctx.reply(
+    '⛔ *Monitoring STOP*\n\nChal rahi scan/fetch ab ruk jayegi.\n\n✅ Dubara ke liye: `/startmonitor`',
+    { parse_mode: 'Markdown' }
+  );
+});
+
+bot.command('startmonitor', ctx => {
+  MONITOR_ENABLED = true;
+  SEARCH_ABORT.delete(ctx.from.id);
+  ctx.reply(
+    '✅ *Monitoring START*\n\nAb `/search` ya `/fetch` chala sakte ho.',
+    { parse_mode: 'Markdown' }
+  );
+});
+
 bot.command('search', async ctx => {
   const text = ctx.message.text.trim();
   const rest = text.replace(/^\/search\s*/i, '').trim();
   if (!rest) {
     return ctx.reply(searchHelpText(), { parse_mode: 'Markdown' });
+  }
+  if (!MONITOR_ENABLED) {
+    return ctx.reply('⛔ Pehle `/startmonitor` bhejo.', { parse_mode: 'Markdown' });
   }
   if (/\bnow\b/i.test(rest)) {
     return executeSearch(ctx, parseSearchCommand(text));
@@ -297,12 +348,13 @@ bot.command('done', ctx => {
 });
 
 bot.command('fetch', async ctx => {
+  if (!MONITOR_ENABLED) return ctx.reply('⛔ `/startmonitor` pehle', { parse_mode: 'Markdown' });
   if (!globalPanels.length) return ctx.reply('Pehle addtxt.');
   const uid = ctx.from.id;
   const status = await ctx.reply(`⚡ Fetch ${globalPanels.length} panels...`);
   try {
     const devices = await fetchAllPanels(globalPanels, {
-      batch: 35,
+      batch: 60,
       onProgress(done, total, count) {
         if (done % 25 === 0 || done === total) {
           ctx.telegram
