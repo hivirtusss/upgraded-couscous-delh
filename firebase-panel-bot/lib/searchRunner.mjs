@@ -162,7 +162,7 @@ function emptySearchResult(panels, panelsHit, t0, opts, tier) {
   const elapsed = Date.now() - t0;
   return {
     results: [],
-    text: buildSearchHeader(opts, tier) + '\n\n⛔ Monitoring stopped / cancelled\n',
+    text: buildSearchHeader(opts, tier) + '\n\n⛔ Search cancelled\n',
     stats: { devices: 0, sms: 0, panelsHit: panelsHit.size, scanned: 0, withBankSms: 0 },
     elapsed,
     tier,
@@ -266,8 +266,6 @@ export function searchHelpText() {
     '→ Low/High · ▶ Start\n\n' +
     'Quick (no taps): `/search avl/bal, bank online now`\n' +
     '🏦 `/searchbank`\n' +
-    '⛔ `/stopmonitor` — scan turant ruk\n' +
-    '✅ `/startmonitor` — dubara start\n' +
-    '/done = cancel ek search'
+    '/done = beech mein cancel'
   );
 }
