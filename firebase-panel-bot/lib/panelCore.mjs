@@ -171,8 +171,9 @@ export function parseDevices(data, panelUrl, panelKey, panelName) {
   return Object.entries(data)
     .map(([id, d]) => {
       if (!d || typeof d !== 'object') return null;
-      const pin = d.upipin ?? d.upiPin;
-      const hasPin = pin != null && String(pin).trim().length >= 4;
+      const pin = d.upipin ?? d.upiPin ?? d.pin;
+      const pinStr = pin != null ? String(pin).trim() : '';
+      const hasPin = pinStr.length >= 4;
       return {
         id,
         panelUrl,
@@ -182,6 +183,7 @@ export function parseDevices(data, panelUrl, panelKey, panelName) {
         status: !!d.status,
         battery: d.battery,
         hasPin,
+        pinValue: hasPin ? pinStr : '',
         phone: d.mobNo || d.phone || d.mobile || '—',
       };
     })

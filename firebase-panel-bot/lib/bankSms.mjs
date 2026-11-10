@@ -126,9 +126,42 @@ export function extractTxnAmount(text) {
 }
 
 export function parseSmsTime(timeStr, fbKey = '') {
-  if (fbKey && /^\d{10,}$/.test(String(fbKey))) return parseInt(fbKey, 10);
-  const p = Date.parse(String(timeStr || ''));
+  if (fbKey && /^\d{10,}$/.test(String(fbKey))) {
+    const n = parseInt(fbKey, 10);
+    return n < 1e12 ? n * 1000 : n;
+  }
+  const raw = String(timeStr || '').trim();
+  if (!raw) return 0;
+  const dmy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[,\s]+(\d{1,2}):(\d{2}))?/);
+  if (dmy) {
+    let y = parseInt(dmy[3], 10);
+    if (y < 100) y += 2000;
+    const dt = new Date(y, parseInt(dmy[2], 10) - 1, parseInt(dmy[1], 10), dmy[4] ? parseInt(dmy[4], 10) : 0, dmy[5] ? parseInt(dmy[5], 10) : 0);
+    return dt.getTime() || 0;
+  }
+  const p = Date.parse(raw);
   return Number.isFinite(p) ? p : 0;
+}
+
+export function formatSmsWhen(ts, timeStr) {
+  if (ts && ts > 0) {
+    try {
+      return new Date(ts).toLocaleString('en-IN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+        timeZone: 'Asia/Kolkata',
+      });
+    } catch {
+      /* fall through */
+    }
+  }
+  const t = String(timeStr || '').trim();
+  return t || '—';
 }
 
 export function processBankMessages(data, days = 0) {
