@@ -55,7 +55,7 @@ export function optsFromWizard(w) {
     noPinOnly: w.pin === 'without',
     tier: w.tier || 'low_high',
     bankOnly: true,
-    avlBal: true,
+    avlBal: false,
   };
 }
 

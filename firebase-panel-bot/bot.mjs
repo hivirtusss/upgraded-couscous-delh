@@ -179,8 +179,9 @@ async function executeSearch(ctx, opts) {
       status.message_id,
       undefined,
       `✅ Done! ${kw} | ${onlineLbl} | ${pinLbl} | ${sortLbl} | ${dayLbl}\n` +
-        `📊 ${out.stats.sms} matches in ${(out.elapsed / 1000).toFixed(0)}s\n` +
-        '📄 File sent above ☝️'
+        `📊 SMS: ${out.stats.sms} · TXT devices: ${out.stats.devices}\n` +
+        `🔎 Scanned: ${out.stats.scanned} · bank SMS: ${out.stats.withBankSms} · tier match: ${out.stats.devices}\n` +
+        `⏱ ${(out.elapsed / 1000).toFixed(0)}s · 📄 File upar ☝️`
     );
 
     USER_PANELS.set(uid, { devices: out.results, at: Date.now(), search: opts });

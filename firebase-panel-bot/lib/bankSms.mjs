@@ -99,6 +99,9 @@ export function isBankSms(text, sender = '') {
   if (credited && bankHint) return true;
   if (debited && bankHint) return true;
   if (/avl\s*bal|available\s+bal/i.test(text) && (verified || REAL_BANKS.test(text))) return true;
+  if ((credited || debited) && HAS_MONEY.test(text) && (REAL_BANKS.test(text) || BANK_TXN_HINT.test(text))) {
+    return true;
+  }
   return false;
 }
 
@@ -119,10 +122,37 @@ export function extractAvlBalance(text) {
 }
 
 export function extractTxnAmount(text) {
-  const m = text.match(
-    /(?:debited?|credited?|received)[^.\n]{0,60}(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i
-  );
-  return m?.[1] ? parseAmount(m[1]) : 0;
+  const patterns = [
+    /(?:debited?|credited?|received|paid|sent|transfer)[\s\S]{0,90}(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
+    /(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)[\s\S]{0,40}(?:debited?|credited?|received)/i,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m?.[1]) {
+      const v = parseAmount(m[1]);
+      if (v >= 1) return v;
+    }
+  }
+  return 0;
+}
+
+export function maxMoneyInText(text) {
+  let max = 0;
+  const re = /(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi;
+  let m;
+  while ((m = re.exec(text))) {
+    const v = parseAmount(m[1]);
+    if (v > max && v < 99_999_999) max = v;
+  }
+  return max;
+}
+
+export function devicePeakAmount(row) {
+  let peak = Math.max(row.maxBalance || 0, row.maxTxn || 0);
+  for (const sms of row.bankSms || []) {
+    peak = Math.max(peak, sms.avlAmount || 0, sms.txnAmount || 0, maxMoneyInText(sms.text));
+  }
+  return peak;
 }
 
 export function parseSmsTime(timeStr, fbKey = '') {
@@ -182,7 +212,14 @@ export function processBankMessages(data, days = 0) {
     bankSms.push({ text, sender, time: timeStr, ts, avlAmount, txnAmount });
   }
   bankSms.sort((a, b) => (b.ts || 0) - (a.ts || 0));
-  const maxBalance = bankSms.reduce((m, x) => Math.max(m, x.avlAmount || 0), 0);
-  const maxTxn = bankSms.reduce((m, x) => Math.max(m, x.txnAmount || 0), 0);
+  let maxBalance = 0;
+  let maxTxn = 0;
+  for (const x of bankSms) {
+    maxBalance = Math.max(maxBalance, x.avlAmount || 0);
+    maxTxn = Math.max(maxTxn, x.txnAmount || 0);
+    const any = maxMoneyInText(x.text);
+    if (/avl\s*bal|available\s+bal/i.test(x.text)) maxBalance = Math.max(maxBalance, any);
+    else if (x.txnAmount || any) maxTxn = Math.max(maxTxn, any);
+  }
   return { bankSms, maxBalance, maxTxn, bankSmsCount: bankSms.length };
 }
