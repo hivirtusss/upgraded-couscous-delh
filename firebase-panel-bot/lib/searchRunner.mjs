@@ -149,7 +149,8 @@ export function buildExportText(results, opts, tier, panelsTotal, dbPanelsHit, e
     smsList.forEach(m => {
       const when = formatSmsWhen(m.ts, m.time);
       lines.push('---------------------------------------------------');
-      lines.push(`[${m.sender}] | ${when}`);
+      const tag = m.txnType === 'credit' ? 'CREDIT' : m.txnType === 'debit' ? 'DEBIT' : 'BANK';
+      lines.push(`[${m.sender}] | ${tag} | ${when}`);
       lines.push(m.text);
     });
     lines.push('');
