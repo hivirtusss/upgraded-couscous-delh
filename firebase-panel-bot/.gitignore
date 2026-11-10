@@ -1,2 +1,4 @@
 node_modules/
 .bot-data/
+export/*.txt
+user-drive-panels-source.txt
