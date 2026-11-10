@@ -208,13 +208,14 @@ export async function runSearch(panels, opts, onProgress) {
 export function searchHelpText() {
   return (
     '🔎 *Search Commands*\n\n' +
-    'Quick:\n' +
-    '`/search avl/bal, bank online`\n\n' +
-    '🏦 High balance:\n' +
-    '`/searchbank` ya `30-90L, high`\n\n' +
-    '📩 File + caption `addtxt` ya `/fb`\n\n' +
-    '• spam SMS auto remove\n' +
-    '• TXT mein full Firebase + Device ID\n' +
+    'Step flow (tap buttons):\n' +
+    '`/search avl/bal, bank online`\n' +
+    '→ Online / Offline / Both\n' +
+    '→ 1 / 3 / 7 / 15 / 30 days · All time\n' +
+    '→ With PIN · Without · Both\n' +
+    '→ Low/High · ▶ Start\n\n' +
+    'Quick (no taps): `/search avl/bal, bank online now`\n' +
+    '🏦 `/searchbank`\n' +
     '/done = cancel'
   );
 }
