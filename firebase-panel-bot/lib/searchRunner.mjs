@@ -4,6 +4,7 @@ import { processBankMessages, formatSmsWhen } from './bankSms.mjs';
 const TIERS = {
   low_high: { min: 2_000, max: 50_000, label: 'BAL 2K–50K (bada→chota)', sort: 'desc' },
   high_low: { min: 30_000, max: 9_000_000, label: 'BAL 30K–90L (bada→chota)', sort: 'desc' },
+  mixed_all: { min: 0, max: 9_999_999_999, label: 'MIXED ALL AMOUNT', sort: 'desc', allAmounts: true },
   bank70k: { min: 70_000, max: 10_000_000, label: 'Bank 70K–1Cr', sort: 'desc' },
   user30_90L: { min: 30_000, max: 9_000_000, label: 'BAL 30K–90L', sort: 'desc' },
 };
@@ -46,6 +47,7 @@ export function parseSearchCommand(text) {
       opts.days = parseInt(p.match(/\d+/)?.[0] || '1', 10);
     } else if (p === 'high' || p === 'high-low') opts.tier = 'high_low';
     else if (p === 'low' || p === 'low-high') opts.tier = 'low_high';
+    else if (p === 'mixed' || p === 'all' || p === 'mixed all') opts.tier = 'mixed_all';
     else if (p === '30k' || p === '30-90l') opts.tier = 'user30_90L';
     else if (/avl|bal/.test(p)) opts.avlBal = true;
     else if (p === 'bank' || p === 'bank online') opts.bankOnly = true;
@@ -184,9 +186,15 @@ export async function runSearch(panels, opts, onProgress) {
           if (opts.avlBal && !r.maxBalance && !r.bankSms.some(m => /avl\s*bal/i.test(m.text))) return;
           const row = { ...d, bankSms: r.bankSms, maxBalance: r.maxBalance, maxTxn: r.maxTxn };
           const amt = row.maxBalance || row.maxTxn || 0;
-          if (amt > 0 && (amt < tier.min || amt > tier.max)) return;
-          if (amt === 0 && (opts.tier === 'high_low' || opts.tier === 'user30_90L' || opts.tier === 'bank70k')) {
-            return;
+          const allAmt = tier.allAmounts || opts.tier === 'mixed_all';
+          if (!allAmt) {
+            if (amt > 0 && (amt < tier.min || amt > tier.max)) return;
+            if (
+              amt === 0 &&
+              (opts.tier === 'high_low' || opts.tier === 'user30_90L' || opts.tier === 'bank70k')
+            ) {
+              return;
+            }
           }
           results.push(row);
         } catch (_) {}

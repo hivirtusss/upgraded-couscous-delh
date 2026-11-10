@@ -97,9 +97,10 @@ export function pinKeyboard() {
 export function sortKeyboard() {
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback('💰 2K–50K (bada upar)', 'sw|sort|low'),
-      Markup.button.callback('💰 30K–90L (bada upar)', 'sw|sort|high'),
+      Markup.button.callback('💰 2K–50K', 'sw|sort|low'),
+      Markup.button.callback('💰 30K–90L', 'sw|sort|high'),
     ],
+    [Markup.button.callback('🔀 Mixed All (sab amount)', 'sw|sort|mixed')],
     [Markup.button.callback('▶ START SEARCH', 'sw|go|start')],
   ]);
 }
@@ -122,8 +123,9 @@ export function pinLabel(pin) {
 }
 
 export function sortLabel(sort) {
-  if (sort === 'high') return '30K–90L · 90L upar → 30K niche';
-  return '2K–50K · 50K upar → 2K niche';
+  if (sort === 'high') return '30K–90L · bada upar';
+  if (sort === 'mixed') return 'Mixed · chota+bada sab · bada upar';
+  return '2K–50K · bada upar';
 }
 
 /** Ek hi message update — nayi chat bar nahi */

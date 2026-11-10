@@ -251,12 +251,14 @@ bot.action(/^sw\|pin\|(with|without|both)$/, async ctx => {
   await editWizardStep(ctx, w, 4, sortKeyboard);
 });
 
-bot.action(/^sw\|sort\|(low|high)$/, async ctx => {
+bot.action(/^sw\|sort\|(low|high|mixed)$/, async ctx => {
   await ctx.answerCbQuery();
   const w = SEARCH_WIZARD.get(ctx.from.id);
   if (!w?.pin) return ctx.answerCbQuery('PIN step', { show_alert: true });
   w.sort = ctx.match[1];
-  w.tier = w.sort === 'high' ? (w.tier === 'bank70k' ? 'bank70k' : 'high_low') : 'low_high';
+  if (w.sort === 'mixed') w.tier = 'mixed_all';
+  else if (w.sort === 'high') w.tier = w.tier === 'bank70k' ? 'bank70k' : 'high_low';
+  else w.tier = 'low_high';
   SEARCH_WIZARD.set(ctx.from.id, w);
   await editWizardStep(ctx, w, 4, sortKeyboard);
 });
@@ -268,10 +270,12 @@ bot.action(/^sw\|go\|start$/, async ctx => {
     return ctx.answerCbQuery('Status → Days → PIN complete karo', { show_alert: true });
   }
   if (!w.sort) {
-    w.sort = 'low';
-    w.tier = 'low_high';
+    w.sort = 'mixed';
+    w.tier = 'mixed_all';
   }
-  if (w.sort === 'high' && w.tier !== 'bank70k') w.tier = 'high_low';
+  if (w.sort === 'mixed') w.tier = 'mixed_all';
+  else if (w.sort === 'high' && w.tier !== 'bank70k') w.tier = 'high_low';
+  else if (w.sort === 'low') w.tier = 'low_high';
   try {
     await ctx.editMessageText(
       wizardMessage(w, 4) + '\n\n⚡ *Search start* — saari Firebase scan...',
