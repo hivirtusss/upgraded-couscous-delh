@@ -141,7 +141,7 @@ export function panelName(url) {
   }
 }
 
-export async function firebaseGet(baseUrl, key, path, ms = 7000) {
+export async function firebaseGet(baseUrl, key, path, ms = 9000) {
   const url = normalizeFirebaseUrl(baseUrl);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);

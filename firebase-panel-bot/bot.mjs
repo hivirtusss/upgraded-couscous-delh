@@ -150,11 +150,8 @@ async function executeSearch(ctx, opts) {
 
   const abort = () => SEARCH_ABORT.get(uid) !== 'running';
   try {
-    const out = await runSearch(
-      globalPanels,
-      opts,
-      prog => {
-        if (abort()) return;
+    const out = await runSearch(globalPanels, opts, prog => {
+      if (abort()) return;
       let msg = '⚡ Search...';
       if (prog.phase === 'panels') {
         msg = `📥 DBs ${prog.done}/${prog.total} · ${prog.count} devices`;
@@ -162,14 +159,9 @@ async function executeSearch(ctx, opts) {
         msg = `📌 SMS ${prog.done}/${prog.total} · matched ${prog.matched}`;
       }
       ctx.telegram.editMessageText(ctx.chat.id, status.message_id, undefined, msg).catch(() => {});
-      },
-      abort
-    );
+    });
 
-    if (abort() || out.aborted) {
-      await ctx.telegram
-        .editMessageText(ctx.chat.id, status.message_id, undefined, '⛔ Search cancel (/done).')
-        .catch(() => {});
+    if (abort()) {
       SEARCH_ABORT.delete(uid);
       return;
     }
@@ -299,11 +291,9 @@ bot.command('fb', ctx => {
 });
 
 bot.command('done', ctx => {
-  const uid = ctx.from.id;
-  if (SEARCH_ABORT.get(uid) === 'running') SEARCH_ABORT.set(uid, 'stop');
-  else SEARCH_ABORT.delete(uid);
-  SEARCH_WIZARD.delete(uid);
-  ctx.reply(`✅ Cancel OK · Panels: ${globalPanels.length}\n/search dubara chalao.`);
+  SEARCH_ABORT.delete(ctx.from.id);
+  SEARCH_WIZARD.delete(ctx.from.id);
+  ctx.reply(`✅ Panels: ${globalPanels.length}\n/search se wizard start karo.`);
 });
 
 bot.command('fetch', async ctx => {
@@ -312,7 +302,7 @@ bot.command('fetch', async ctx => {
   const status = await ctx.reply(`⚡ Fetch ${globalPanels.length} panels...`);
   try {
     const devices = await fetchAllPanels(globalPanels, {
-      batch: 60,
+      batch: 35,
       onProgress(done, total, count) {
         if (done % 25 === 0 || done === total) {
           ctx.telegram

