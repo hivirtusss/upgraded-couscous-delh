@@ -1,11 +1,48 @@
+/** APK jaisa strict bank SMS — spam / loan / promo hatao */
+
+const REAL_BANKS =
+  /\b(HDFC|HDFCBANK|SBI|STATE\s*BANK|ICICI|ICICIBANK|AXIS|AXISBANK|KOTAK|KOTAKBANK|PNB|PUNJAB\s*NATIONAL|CANARA|CANARA\s*BANK|BOI|BANK\s*OF\s*INDIA|UNION\s*BANK|YES\s*BANK|YESBANK|IDBI|INDUSIND|FEDERAL|FEDERAL\s*BANK|RBL|RBL\s*BANK|IDFC|IDFC\s*FIRST|BARODA|BANK\s*OF\s*BARODA|BOB|INDIAN\s*BANK|UCO|UCO\s*BANK|CENTRAL\s*BANK|IOB|INDIAN\s*OVERSEAS|BANDHAN|AU\s*BANK|KARNATAKA\s*BANK|KARUR\s*VYSYA|KVBL|SOUTH\s*INDIAN|TMB|CITY\s*UNION|DCB|CSB|SBM|STANDARD\s*CHARTERED|CITI|HSBC|DBS|AMEX|NPCI)\b/i;
+
+const VERIFIED_BANK_CODES = new Set([
+  'BOIIND', 'HDFCBK', 'HDFCBN', 'SBIIN', 'SBIPSG', 'SBICRD', 'ICICIB', 'ICICIT', 'ICICIP',
+  'AXISBK', 'UTIBBK', 'KOTAKB', 'KMBL', 'PNBSMS', 'PNBANK', 'CANBNK', 'CANBK', 'UNIONB', 'UBINBK',
+  'YESBNK', 'YESB', 'IDFCBK', 'IDFCFB', 'FEDBNK', 'FEDBANK', 'RBLBNK', 'RBLBKL', 'BARODX', 'BARBNK',
+  'INDBNK', 'INDIANB', 'UCOBNK', 'UCOBK', 'CENTBK', 'IOBBNK', 'IOBBK', 'BKIDIN', 'BKID', 'BANDHN',
+  'AUBANK', 'KARBK', 'KVBLBK', 'KVB', 'CSBBNK', 'SBMINB', 'SCBANK', 'CITIBK', 'HSBCBK', 'DBSBK',
+  'IPBMSG', 'IPPB', 'BAJAJF', 'BAJAJFI', 'BAJAJFN', 'NPCI',
+  'PYTM', 'PAYTM', 'PHONEPE', 'PHONPE', 'GPAY', 'GOOGPAY', 'AMZPAY', 'MOBIKW', 'AIRPAY', 'JIOPAY',
+]);
+
+const SCAM_SENDER_CODES =
+  /NCDPL|ARHAMS|PRSSAT|SRVIFY|SERVIFY|URDO|CDNSE|BILLAR|SMG888|MARKS|RHAMS|D1H7N|Z1R6N|D1H8N|ICAM|RHAMSH|BILLARH/i;
+const DLT_PREFIX = /^(?:VM|JD|JX|AD|BZ|VK|TM|AX|BP|CP|HP|IP|DG|DM|AM|BT|SP|QP|TX|VA|BW|JM|ID|BK|QP)-/;
+
 const SCAM_BLOCK =
-  /betting|casino|rummy|matka|satta|jackpot|aviator|bet365|1xbet|gambling|wagering|telegram|t\.me|bit\.ly|http|https|www\.|\.apk|deposit\s*now|play\s*now/i;
-const CREDIT_WORDS = /\b(credited?|received|recd|deposited)\b/i;
-const DEBIT_WORDS = /\b(debited?|withdrawn|sent|paid)\b/i;
-const HAS_MONEY = /(?:Rs\.?\s*|INR\s*|₹\s*)[0-9,]+(?:\.[0-9]{1,2})?/i;
+  /dearcustomer|betting|casino|rummy|teenpatti|matka|satta|jackpot|aviator|bet365|1xbet|slot|poker|fantasy|dream11|mpl\b|winzo|gambling|telegram|t\.me|bit\.ly|tinyurl|goo\.gl|wa\.me|whatsapp|click\s*here|play\s*now|install|download|\.apk|congratul|you\s+won|lottery|loan\s*approv|pre[\s-]?approved|instant\s+loan|reward\s*point|referral|invite\s*code|cashback|promo|unsubscribe|dlwagame|wagering|91club|colourwiz|wingo|exchange|prediction/i;
+
+const FAKE_SENDER = /PROMO|OFFER|ADVERT|SPAM|GAME|BET|WIN|LOAN|CREDIT|INFO|ALERT|UPDATE|NOTICE|VERIFY|OTP|CASH|PRIZE|REWARD|LUCKY|PLAY|SPIN|CLUB|SLOT|GAMING|CASINO|RUMMY|MATKA|SATTA|JEETO|KHELO|DAMAN|CLUB91|91CLUB/i;
+
+const SKIP_SMS =
+  /\b(otp|one[\s-]?time|verification|verify\s|do\s+not\s+share|password|pin\s+is|valid\s+for|discount|recharge|data\s+pack|validity|loan\s+offer|unsubscribe|promo|cashback|free\s+data|sim\s|port\s|courier|swiggy|zomato|weather|news|mega\s+sale|festive\s+offer)\b/i;
+
+const BANK_ACTION =
+  /\b(debited?|credited?|received|sent|withdrawn|deposited|paid|payment|transfer(?:red)?|avl\.?\s*bal|available\s+bal|imps|neft|rtgs|utr)\b/i;
+
+const CREDIT_WORDS = /\b(credited?|received|recd|deposited|amt\s*credited|money\s+received)\b/i;
+const DEBIT_WORDS = /\b(debited?|withdrawn|sent|paid|deducted)\b/i;
+const HAS_MONEY = /(?:Rs\.?\s*|INR\s*|₹\s*)[0-9,]+(?:\.[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?/i;
+
+const HAS_LINKISH =
+  /(?:https?:\/\/|www\.|\blink\b|t\.me\/|wa\.me\/|bit\.ly|cutt\.ly|tinyurl|goo\.gl)/i;
+
+const FAKE_AC_PHONE = /A\/C\s*\d{10,}/i;
+const BANK_TXN_HINT =
+  /\b(A\/C|Acct|Account|XX\d{4}|X{2,}\d{4}|UPI\/|VPA|ref\.?\s*no|UTR|IMPS|NEFT|RTGS)\b/i;
+
 const AVL_PATTERNS = [
   /Avl\.?\s*Bal[^0-9]*([0-9,]+(?:\.[0-9]{1,2})?)/i,
-  /Available\s+Bal[^0-9]*([0-9,]+(?:\.[0-9]{1,2})?)/i,
+  /Aval\.?\s*Bal[^0-9]*([0-9,]+(?:\.[0-9]{1,2})?)/i,
+  /Available\s+Bal(?:ance)?[^0-9]*([0-9,]+(?:\.[0-9]{1,2})?)/i,
 ];
 
 function extractSmsText(raw) {
@@ -14,21 +51,55 @@ function extractSmsText(raw) {
   return String(raw.message || raw.body || raw.text || raw.msg || '').trim();
 }
 
-export function isScamSms(text) {
-  if (!text || text.length < 8) return true;
+function normalizeSender(sender) {
+  return String(sender || '').toUpperCase().replace(/\s/g, '');
+}
+
+function senderTokenOk(token) {
+  const code = String(token || '').replace(/[^A-Z0-9]/g, '');
+  if (code.length < 4) return false;
+  if (SCAM_SENDER_CODES.test(code)) return false;
+  return VERIFIED_BANK_CODES.has(code);
+}
+
+function isVerifiedBankSender(sender) {
+  const s = normalizeSender(sender);
+  if (!s || s === '?') return false;
+  if (SCAM_SENDER_CODES.test(s)) return false;
+  if (senderTokenOk(s)) return true;
+  return s.split('-').filter(Boolean).some(p => senderTokenOk(p));
+}
+
+function isScamSms(text, sender = '') {
+  if (!text || text.length < 10) return true;
+  const s = normalizeSender(sender);
+  const verified = isVerifiedBankSender(sender);
   if (SCAM_BLOCK.test(text)) return true;
+  if (SCAM_SENDER_CODES.test(s)) return true;
+  if (FAKE_AC_PHONE.test(text)) return true;
+  if (FAKE_SENDER.test(s) && !verified) return true;
+  if (DLT_PREFIX.test(s) && !verified) return true;
+  if (HAS_LINKISH.test(text)) return true;
+  if (!verified && /customer|dear\s+user|congratul/i.test(text)) return true;
   return false;
 }
 
-export function isBankSms(text) {
+export function isBankSms(text, sender = '') {
   if (!text || text.length < 12) return false;
-  if (isScamSms(text)) return false;
+  if (isScamSms(text, sender)) return false;
+  if (SKIP_SMS.test(text) && !CREDIT_WORDS.test(text) && !DEBIT_WORDS.test(text)) return false;
   if (!HAS_MONEY.test(text)) return false;
-  return (
-    CREDIT_WORDS.test(text) ||
-    DEBIT_WORDS.test(text) ||
-    /avl\s*bal|account|credited|debited|neft|imps/i.test(text)
-  );
+
+  const verified = isVerifiedBankSender(sender);
+  const credited = CREDIT_WORDS.test(text);
+  const debited = DEBIT_WORDS.test(text);
+  const bankHint = BANK_TXN_HINT.test(text) || REAL_BANKS.test(text) || BANK_ACTION.test(text);
+
+  if (verified && (credited || debited || /avl\s*bal|balance/i.test(text))) return true;
+  if (credited && bankHint) return true;
+  if (debited && bankHint) return true;
+  if (/avl\s*bal|available\s+bal/i.test(text) && (verified || REAL_BANKS.test(text))) return true;
+  return false;
 }
 
 function parseAmount(s) {
@@ -49,10 +120,9 @@ export function extractAvlBalance(text) {
 
 export function extractTxnAmount(text) {
   const m = text.match(
-    /(?:debited?|credited?|received)[^.\n]{0,50}(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i
+    /(?:debited?|credited?|received)[^.\n]{0,60}(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i
   );
-  if (m?.[1]) return parseAmount(m[1]);
-  return 0;
+  return m?.[1] ? parseAmount(m[1]) : 0;
 }
 
 export function parseSmsTime(timeStr, fbKey = '') {
@@ -69,8 +139,8 @@ export function processBankMessages(data, days = 0) {
   const bankSms = [];
   for (const [key, raw] of Object.entries(data)) {
     const text = extractSmsText(raw);
-    if (!text || !isBankSms(text)) continue;
     const sender = String(raw?.sender || raw?.from || '?');
+    if (!text || !isBankSms(text, sender)) continue;
     const timeStr = String(raw?.dateTime || raw?.date || raw?.timestamp || '');
     const ts = parseSmsTime(timeStr, key);
     if (cutoff && ts && ts < cutoff) continue;

