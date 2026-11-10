@@ -1,0 +1,18 @@
+[Unit]
+Description=Firebase Panel Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/panel-search-bot
+EnvironmentFile=/etc/panel-search-bot.env
+ExecStart=/usr/bin/node /opt/panel-search-bot/bot.mjs
+Restart=always
+RestartSec=8
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=panel-search-bot
+
+[Install]
+WantedBy=multi-user.target
