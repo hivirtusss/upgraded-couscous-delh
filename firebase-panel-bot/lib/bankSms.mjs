@@ -32,7 +32,10 @@ const CREDIT_WORDS =
 const DEBIT_WORDS =
   /\b(debit|debited|debits|send|sent|paid|withdrawn|deducted|transfer\s+to|spent)\b/i;
 const BANK_ACTION =
-  /\b(debited?|credited?|credit|debit|received|recd|send|sent|withdrawn|deposited|paid|payment|transfer(?:red)?|avl\.?\s*bal|available\s+bal|imps|neft|rtgs|utr|upi)\b/i;
+  /\b(debited?|credited?|credit|debit|received|recd|send|sent|withdrawn|deposited|paid|payment|transfer(?:red)?|avl\.?\s*bal|available\s+bal|imps|neft|rtgs|utr|upi|vpa|ifsc|txn|transaction|trf|fund\s*transfer|ecs|nach|emi\s*debited|ach)\b/i;
+
+const RAIL_WORDS =
+  /\b(neft|imps|rtgs|upi|utr|vpa|ifsc|ecs|nach|ach)\b/i;
 
 const HAS_MONEY = /(?:Rs\.?\s*|INR\s*|₹\s*)[0-9,]+(?:\.[0-9]{1,2})?|[0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?/i;
 const HAS_LINKISH =
@@ -123,6 +126,11 @@ export function isBankSms(text, sender = '') {
   if (txn && REAL_BANKS.test(text)) return true;
   if (/avl\s*bal|available\s+bal/i.test(text) && (bankSender || REAL_BANKS.test(text))) return true;
 
+  if (RAIL_WORDS.test(text) && HAS_MONEY.test(text) && (bankSender || bankHint || REAL_BANKS.test(text))) {
+    return true;
+  }
+  if (RAIL_WORDS.test(text) && (bankSender || bankHint)) return true;
+
   if ((credited || debited) && HAS_MONEY.test(text) && text.length >= 20) {
     if (bankSender || bankHint) return true;
   }
@@ -148,8 +156,8 @@ export function extractAvlBalance(text) {
 
 export function extractTxnAmount(text) {
   const patterns = [
-    /(?:debited?|credited?|credit|debit|received|recd|send|sent|paid|transfer)[\s\S]{0,100}(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
-    /(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)[\s\S]{0,50}(?:debited?|credited?|received|sent|paid)/i,
+    /(?:debited?|credited?|credit|debit|received|recd|send|sent|paid|transfer|neft|imps|rtgs|upi)[\s\S]{0,120}(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)/i,
+    /(?:Rs\.?|INR|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)[\s\S]{0,60}(?:debited?|credited?|received|sent|paid|neft|imps|rtgs)/i,
   ];
   for (const re of patterns) {
     const m = text.match(re);
@@ -241,7 +249,11 @@ export function processBankMessages(data, days = 0) {
     const avlAmount = extractAvlBalance(text);
     const txnAmount = extractTxnAmount(text);
     let txnType = 'bank';
-    if (CREDIT_WORDS.test(text)) txnType = 'credit';
+    if (/neft/i.test(text)) txnType = 'NEFT';
+    else if (/imps/i.test(text)) txnType = 'IMPS';
+    else if (/rtgs/i.test(text)) txnType = 'RTGS';
+    else if (/\bupi\b/i.test(text)) txnType = 'UPI';
+    else if (CREDIT_WORDS.test(text)) txnType = 'credit';
     else if (DEBIT_WORDS.test(text)) txnType = 'debit';
     bankSms.push({ text, sender, time: timeStr, ts, avlAmount, txnAmount, txnType });
   }
