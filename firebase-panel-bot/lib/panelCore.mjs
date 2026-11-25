@@ -162,7 +162,7 @@ export async function firebaseGet(baseUrl, key, path, ms = 9000) {
     return data;
   } catch (e) {
     clearTimeout(timer);
-    throw e;
+    return null;
   }
 }
 
@@ -191,9 +191,13 @@ export function parseDevices(data, panelUrl, panelKey, panelName) {
 }
 
 export async function fetchPanelDevices(panel) {
-  const clients = await firebaseGet(panel.url, panel.key, 'clients');
-  if (!clients) return [];
-  return parseDevices(clients, panel.url, panel.key, panel.name);
+  try {
+    const clients = await firebaseGet(panel.url, panel.key, 'clients', 6500);
+    if (!clients) return [];
+    return parseDevices(clients, panel.url, panel.key, panel.name);
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchAllPanels(panels, { batch = 10, onProgress } = {}) {
