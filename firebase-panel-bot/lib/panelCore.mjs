@@ -141,7 +141,7 @@ export function panelName(url) {
   }
 }
 
-export async function firebaseGet(baseUrl, key, path, ms = 9000) {
+export async function firebaseGet(baseUrl, key, path, ms = 4500) {
   const url = normalizeFirebaseUrl(baseUrl);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
@@ -192,7 +192,7 @@ export function parseDevices(data, panelUrl, panelKey, panelName) {
 
 export async function fetchPanelDevices(panel) {
   try {
-    const clients = await firebaseGet(panel.url, panel.key, 'clients', 6500);
+    const clients = await firebaseGet(panel.url, panel.key, 'clients', 4000);
     if (!clients) return [];
     return parseDevices(clients, panel.url, panel.key, panel.name);
   } catch {

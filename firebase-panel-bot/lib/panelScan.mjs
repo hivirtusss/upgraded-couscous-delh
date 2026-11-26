@@ -12,7 +12,7 @@ export async function runFirebaseScan(panels, onProgress) {
   let offline = 0;
   let withPin = 0;
   let panelsDone = 0;
-  const CONC = 55;
+  const CONC = 88;
 
   await mapPool(panels, CONC, async panel => {
     panelsDone++;
