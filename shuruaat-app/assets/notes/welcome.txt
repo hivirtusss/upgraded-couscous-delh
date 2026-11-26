@@ -1,0 +1,8 @@
+Namaste — yeh sample txt file hai.
+
+App se tum:
+1. Phone se koi bhi .txt file khol sakte ho
+2. Firebase config wali .txt file se connect kar sakte ho
+3. Note Firebase par save / load kar sakte ho
+
+Apni diary, goals, ya project notes yahan rakh sakte ho.

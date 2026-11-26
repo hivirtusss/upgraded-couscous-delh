@@ -1,0 +1,14 @@
+{
+  "name": "firebase-panel-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node bot.mjs",
+    "cli": "node cli.mjs",
+    "cli:demo": "node cli.mjs --demo"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3"
+  }
+}
