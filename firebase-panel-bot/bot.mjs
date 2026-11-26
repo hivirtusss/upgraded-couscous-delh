@@ -180,8 +180,7 @@ async function executeSearch(ctx, opts) {
         prog.panelsDone >= prog.panelsTotal && prog.panelsTotal > 0;
       if (!isLast && now - lastProgEdit < 2500) return;
       lastProgEdit = now;
-      const phase = prog.phase === 'sms' ? '📌 SMS' : '📥 DB';
-      const msg = `${phase} · DBs ${prog.panelsDone}/${prog.panelsTotal}\nDevices: ${prog.devices} · match: ${prog.matched}`;
+      const msg = `⏳ DBs ${prog.panelsDone}/${prog.panelsTotal}\nSMS scan: ${prog.devices} · match: ${prog.matched}`;
       ctx.telegram.editMessageText(ctx.chat.id, status.message_id, undefined, msg).catch(() => {});
     });
 

