@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 import { Telegraf, Input } from 'telegraf';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { parseTxtCredentials, fetchAllPanels } from './lib/panelCore.mjs';
 import { parseSearchCommand, runSearch, searchHelpText } from './lib/searchRunner.mjs';
 import { runFirebaseScan } from './lib/panelScan.mjs';
 import { removePanelsFromList, urlsFromRemoveText } from './lib/panelRemove.mjs';
 import { normalizeFirebaseUrl } from './lib/panelCore.mjs';
+import {
+  loadUserPanels,
+  saveUserPanels,
+  ensureUserPanelsStore,
+  ownerTelegramId,
+} from './lib/userPanels.mjs';
 import {
   extractSearchKeywords,
   tierFromRest,
@@ -21,8 +27,7 @@ import {
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const DATA_DIR = process.env.BOT_DATA_DIR || join(process.cwd(), '.bot-data');
-const PANELS_FILE = join(DATA_DIR, 'panels.json');
-const USER_PANELS = new Map();
+const SEARCH_CACHE = new Map();
 const SEARCH_ABORT = new Map();
 const SEARCH_WIZARD = new Map();
 
@@ -32,34 +37,44 @@ if (!TOKEN) {
 }
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+ensureUserPanelsStore(DATA_DIR);
 
-function loadSavedPanels() {
-  if (existsSync(PANELS_FILE)) {
-    try {
-      return JSON.parse(readFileSync(PANELS_FILE, 'utf8'));
-    } catch {
-      return [];
-    }
-  }
-  return [];
+const ownerNote =
+  ownerTelegramId() != null
+    ? `Owner panels isolate OK (ID ${ownerTelegramId()}).`
+    : 'Set BOT_OWNER_TELEGRAM_ID for legacy 16k migrate.';
+
+function uid(ctx) {
+  return ctx.from?.id;
 }
 
-function savePanels(panels) {
-  writeFileSync(PANELS_FILE, JSON.stringify(panels, null, 2));
+function getPanels(userId) {
+  return loadUserPanels(DATA_DIR, userId);
 }
 
-let globalPanels = loadSavedPanels();
+function setPanels(userId, panels) {
+  saveUserPanels(DATA_DIR, userId, panels);
+}
 
-function refreshPanelsFromDisk() {
-  globalPanels = loadSavedPanels();
-  return globalPanels.length;
+function mergePanels(userId, found) {
+  const current = getPanels(userId);
+  const before = current.length;
+  const map = new Map(current.map(p => [p.url.toLowerCase(), p]));
+  for (const p of found) map.set(p.url.toLowerCase(), p);
+  const next = [...map.values()];
+  setPanels(userId, next);
+  return { next, added: next.length - before, total: next.length };
 }
 
 const bot = new Telegraf(TOKEN);
 
 bot.start(ctx => {
+  const u = uid(ctx);
+  const n = getPanels(u).length;
   ctx.reply(
     '✅ Already authorized!\n\n' +
+      `👤 *Tera Telegram ID:* \`${u}\`\n` +
+      `📁 *Tera panel list:* ${n} Firebase (sirf tera — kisi aur ka nahi)\n\n` +
       '📩 .txt + caption `addtxt` / `/fb`\n' +
       '🔎 `/search` — menu\n' +
       '⚡ `/search avl/bal, bank online` → tap options\n' +
@@ -71,17 +86,21 @@ bot.start(ctx => {
 });
 
 bot.command('status', ctx => {
-  const cached = USER_PANELS.get(ctx.from.id);
-  const withKey = globalPanels.filter(p => p.key).length;
+  const u = uid(ctx);
+  const panels = getPanels(u);
+  const cached = SEARCH_CACHE.get(u);
+  const withKey = panels.filter(p => p.key).length;
   ctx.reply(
-    `Total panels (A–Z): *${globalPanels.length}*\n` +
-      `Auth key wale: ${withKey} | Sirf URL: ${globalPanels.length - withKey}\n` +
+    `👤 ID: \`${u}\`\n` +
+      `Total panels (tere): *${panels.length}*\n` +
+      `Auth key wale: ${withKey} | Sirf URL: ${panels.length - withKey}\n` +
       `Last search devices: ${cached?.devices?.length ?? 0}`,
     { parse_mode: 'Markdown' }
   );
 });
 
 bot.command('add', async ctx => {
+  const u = uid(ctx);
   const text = ctx.message.text.replace(/^\/add\s*/i, '').trim();
   const parts = text.split(/[|,]/);
   if (parts.length < 2) {
@@ -89,15 +108,12 @@ bot.command('add', async ctx => {
   }
   const found = parseTxtCredentials(`${parts[0]}\n${parts[1]}`);
   if (!found.length) return ctx.reply('URL/key invalid.');
-  const before = globalPanels.length;
-  const map = new Map(globalPanels.map(p => [p.url.toLowerCase(), p]));
-  for (const p of found) map.set(p.url.toLowerCase(), p);
-  globalPanels = [...map.values()];
-  savePanels(globalPanels);
-  ctx.reply(`✅ ${globalPanels.length - before} naye (total: ${globalPanels.length})`);
+  const { added, total } = mergePanels(u, found);
+  ctx.reply(`✅ ${added} naye (tere total: ${total})`);
 });
 
 bot.on('document', async ctx => {
+  const u = uid(ctx);
   const cap = (ctx.message.caption || '').toLowerCase();
   if (cap.includes('removefb') || cap === 'rm') {
     try {
@@ -106,10 +122,10 @@ bot.on('document', async ctx => {
       const text = await res.text();
       const urls = urlsFromRemoveText(text);
       if (!urls.length) return ctx.reply('File mein Firebase URL nahi mila.');
-      const { panels, removed } = removePanelsFromList(globalPanels, urls);
-      globalPanels = panels;
-      savePanels(globalPanels);
-      return ctx.reply(`🗑 Hatae: *${removed}*\nBaki panels: *${globalPanels.length}*`, {
+      const panels = getPanels(u);
+      const { panels: next, removed } = removePanelsFromList(panels, urls);
+      setPanels(u, next);
+      return ctx.reply(`🗑 Hatae: *${removed}*\nTere panels: *${next.length}*`, {
         parse_mode: 'Markdown',
       });
     } catch (e) {
@@ -125,13 +141,9 @@ bot.on('document', async ctx => {
     const text = await res.text();
     const found = parseTxtCredentials(text);
     if (!found.length) return ctx.reply('File mein Firebase nahi mila.');
-    const before = globalPanels.length;
-    const map = new Map(globalPanels.map(p => [p.url.toLowerCase(), p]));
-    for (const p of found) map.set(p.url.toLowerCase(), p);
-    globalPanels = [...map.values()];
-    savePanels(globalPanels);
+    const { added, total } = mergePanels(u, found);
     ctx.reply(
-      `📂 ${found.length} firebases · ${globalPanels.length - before} naye\nTotal: *${globalPanels.length}*`,
+      `📂 ${found.length} firebases · ${added} naye\nTera total: *${total}*`,
       { parse_mode: 'Markdown' }
     );
   } catch (e) {
@@ -156,24 +168,24 @@ function startSearchWizard(ctx, rest, isBankHigh = false) {
 }
 
 async function executeSearch(ctx, opts) {
-  const panelCount = refreshPanelsFromDisk();
-  if (!panelCount) {
-    return ctx.reply('Pehle `addtxt` se panels add karo.', { parse_mode: 'Markdown' });
+  const userId = uid(ctx);
+  const panels = getPanels(userId);
+  if (!panels.length) {
+    return ctx.reply('Pehle `addtxt` se *apna* panels add karo.', { parse_mode: 'Markdown' });
   }
-  const uid = ctx.from.id;
-  if (SEARCH_ABORT.get(uid) === 'running') {
+  if (SEARCH_ABORT.get(userId) === 'running') {
     return ctx.reply('Pehle /done bhejo ya wait karo.');
   }
-  SEARCH_ABORT.set(uid, 'running');
+  SEARCH_ABORT.set(userId, 'running');
   const kw = (opts.keywords || ['avl/bal', 'bank']).join(', ');
-  const status = await ctx.reply(`⚡ Scan *${globalPanels.length}* Firebase...\n📌 ${kw}`, {
+  const status = await ctx.reply(`⚡ Scan *${panels.length}* Firebase (tere list)...\n📌 ${kw}`, {
     parse_mode: 'Markdown',
   });
 
-  const abort = () => SEARCH_ABORT.get(uid) !== 'running';
+  const abort = () => SEARCH_ABORT.get(userId) !== 'running';
   let lastProgEdit = 0;
   try {
-    const out = await runSearch(globalPanels, opts, prog => {
+    const out = await runSearch(panels, opts, prog => {
       if (abort()) return;
       const now = Date.now();
       const isLast =
@@ -185,7 +197,7 @@ async function executeSearch(ctx, opts) {
     });
 
     if (abort()) {
-      SEARCH_ABORT.delete(uid);
+      SEARCH_ABORT.delete(userId);
       return;
     }
 
@@ -207,14 +219,14 @@ async function executeSearch(ctx, opts) {
         `⏱ ${(out.elapsed / 1000).toFixed(0)}s · 📄 File upar ☝️`
     );
 
-    USER_PANELS.set(uid, { devices: out.results, at: Date.now(), search: opts });
-    SEARCH_WIZARD.delete(uid);
+    SEARCH_CACHE.set(userId, { devices: out.results, at: Date.now(), search: opts });
+    SEARCH_WIZARD.delete(userId);
   } catch (e) {
     await ctx.telegram
       .editMessageText(ctx.chat.id, status.message_id, undefined, '❌ ' + e.message)
       .catch(() => {});
   } finally {
-    SEARCH_ABORT.delete(uid);
+    SEARCH_ABORT.delete(userId);
   }
 }
 
@@ -302,7 +314,7 @@ bot.action(/^sw\|go\|start$/, async ctx => {
   else if (w.sort === 'low') w.tier = 'low_high';
   try {
     await ctx.editMessageText(
-      wizardMessage(w, 4) + '\n\n⚡ *Search start* — saari Firebase scan...',
+      wizardMessage(w, 4) + '\n\n⚡ *Search start* — tera Firebase list scan...',
       { parse_mode: 'Markdown' }
     );
   } catch (_) {}
@@ -310,21 +322,23 @@ bot.action(/^sw\|go\|start$/, async ctx => {
 });
 
 bot.command('fb', ctx => {
-  ctx.reply(`📩 .txt + \`fb\` caption · Panels: ${globalPanels.length}`, { parse_mode: 'Markdown' });
+  const n = getPanels(uid(ctx)).length;
+  ctx.reply(`📩 .txt + \`fb\` caption · Tere panels: ${n}`, { parse_mode: 'Markdown' });
 });
 
 bot.command('done', ctx => {
   SEARCH_ABORT.delete(ctx.from.id);
   SEARCH_WIZARD.delete(ctx.from.id);
-  ctx.reply(`✅ Panels: ${globalPanels.length}\n/search se wizard start karo.`);
+  ctx.reply(`✅ Tere panels: ${getPanels(uid(ctx)).length}\n/search se wizard start karo.`);
 });
 
 bot.command('fetch', async ctx => {
-  if (!globalPanels.length) return ctx.reply('Pehle addtxt.');
-  const uid = ctx.from.id;
-  const status = await ctx.reply(`⚡ Fetch ${globalPanels.length} panels...`);
+  const userId = uid(ctx);
+  const panels = getPanels(userId);
+  if (!panels.length) return ctx.reply('Pehle addtxt.');
+  const status = await ctx.reply(`⚡ Fetch ${panels.length} panels (tere)...`);
   try {
-    const devices = await fetchAllPanels(globalPanels, {
+    const devices = await fetchAllPanels(panels, {
       batch: 35,
       onProgress(done, total, count) {
         if (done % 25 === 0 || done === total) {
@@ -334,7 +348,7 @@ bot.command('fetch', async ctx => {
         }
       },
     });
-    USER_PANELS.set(uid, { devices, at: Date.now() });
+    SEARCH_CACHE.set(userId, { devices, at: Date.now() });
     const on = devices.filter(d => d.status).length;
     await ctx.telegram.editMessageText(
       ctx.chat.id,
@@ -348,54 +362,57 @@ bot.command('fetch', async ctx => {
 });
 
 bot.command('online', ctx => {
-  const cached = USER_PANELS.get(ctx.from.id);
+  const cached = SEARCH_CACHE.get(ctx.from.id);
   if (!cached?.devices?.length) return ctx.reply('Pehle /search.');
   const online = cached.devices.filter(d => d.status);
   ctx.reply(`Online: ${online.length}`);
 });
 
 bot.command('removefb', async ctx => {
+  const userId = uid(ctx);
+  const panels = getPanels(userId);
   const arg = ctx.message.text.replace(/^\/removefb\s*/i, '').trim();
   if (!arg || arg === 'help') {
     return ctx.reply(
-      '🗑 *Remove Firebase*\n\n' +
+      '🗑 *Remove Firebase* (sirf teri list)\n\n' +
         '`/removefb all` — sab clear\n' +
         '`/removefb https://xxx.firebaseio.com` — ek URL\n' +
         'File + caption `removefb` — list se hatao\n\n' +
-        `Ab loaded: *${globalPanels.length}*`,
+        `Tere loaded: *${panels.length}*`,
       { parse_mode: 'Markdown' }
     );
   }
   if (/^(all|clear|sab)$/i.test(arg)) {
-    const n = globalPanels.length;
-    globalPanels = [];
-    savePanels(globalPanels);
-    return ctx.reply(`🗑 ${n} panels clear. Total: 0`);
+    const n = panels.length;
+    setPanels(userId, []);
+    return ctx.reply(`🗑 ${n} panels clear. Tera total: 0`);
   }
   const url = normalizeFirebaseUrl(arg.split(/\s/)[0]);
-  const { panels, removed } = removePanelsFromList(globalPanels, [url]);
+  const { panels: next, removed } = removePanelsFromList(panels, [url]);
   if (!removed) {
-    return ctx.reply('Ye URL list mein nahi thi.');
+    return ctx.reply('Ye URL teri list mein nahi thi.');
   }
-  globalPanels = panels;
-  savePanels(globalPanels);
-  ctx.reply(`🗑 Removed 1. Baki: *${globalPanels.length}*`, { parse_mode: 'Markdown' });
+  setPanels(userId, next);
+  ctx.reply(`🗑 Removed 1. Tere baki: *${next.length}*`, { parse_mode: 'Markdown' });
 });
 
 /** Fast Firebase scan — automatic-tool jaisa (clients only, TXT files) */
 bot.command('fbscan', async ctx => {
-  const n = refreshPanelsFromDisk();
-  if (!n) return ctx.reply('Pehle `addtxt` se panels add karo.', { parse_mode: 'Markdown' });
-  const uid = ctx.from.id;
-  if (SEARCH_ABORT.get(uid) === 'running') {
+  const userId = uid(ctx);
+  const panels = getPanels(userId);
+  if (!panels.length) {
+    return ctx.reply('Pehle `addtxt` se *apna* panels add karo.', { parse_mode: 'Markdown' });
+  }
+  if (SEARCH_ABORT.get(userId) === 'running') {
     return ctx.reply('Pehle /done bhejo.');
   }
-  SEARCH_ABORT.set(uid, 'running');
-  const status = await ctx.reply(`🚀 Aapka scan start ho gaya hai!\n📥 0/${n}`);
+  SEARCH_ABORT.set(userId, 'running');
+  const n = panels.length;
+  const status = await ctx.reply(`🚀 Tera scan start!\n📥 0/${n}`);
   let lastEdit = 0;
   try {
-    const out = await runFirebaseScan(globalPanels, prog => {
-      if (SEARCH_ABORT.get(uid) !== 'running') return;
+    const out = await runFirebaseScan(panels, prog => {
+      if (SEARCH_ABORT.get(userId) !== 'running') return;
       const now = Date.now();
       if (now - lastEdit < 2000 && prog.panelsDone < prog.panelsTotal) return;
       lastEdit = now;
@@ -409,7 +426,7 @@ bot.command('fbscan', async ctx => {
         .catch(() => {});
     });
 
-    if (SEARCH_ABORT.get(uid) !== 'running') return;
+    if (SEARCH_ABORT.get(userId) !== 'running') return;
 
     await ctx.reply(out.report);
     await ctx.replyWithDocument(
@@ -432,7 +449,7 @@ bot.command('fbscan', async ctx => {
       .editMessageText(ctx.chat.id, status.message_id, undefined, '❌ ' + e.message)
       .catch(() => {});
   } finally {
-    SEARCH_ABORT.delete(uid);
+    SEARCH_ABORT.delete(userId);
   }
 });
 
@@ -441,7 +458,7 @@ process.on('unhandledRejection', err => {
 });
 
 bot.launch();
-console.log('Panel search bot (wizard) polling...');
+console.log('Panel search bot (wizard) polling...', ownerNote);
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

@@ -25,6 +25,8 @@ journalctl -u panel-search-bot -f
 systemctl restart panel-search-bot
 ```
 
-Panels data: `/opt/panel-search-bot/.bot-data/panels.json`
+Panels data (per user): `/opt/panel-search-bot/.bot-data/users/<telegram_id>.json`
+
+Owner ke 16k migrate: `/etc/panel-search-bot.env` mein `BOT_OWNER_TELEGRAM_ID=<apna_id>` (`/start` pe dikhega)
 
 **Security:** root password chat mein mat bhejo — Hostinger se reset karo deploy ke baad.

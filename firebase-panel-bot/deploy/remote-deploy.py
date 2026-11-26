@@ -72,8 +72,20 @@ def main():
     run(client, f"cd {REMOTE_DIR} && npm install --omit=dev", timeout=900)
 
     import base64
+    import re
 
+    owner_keep = ""
+    try:
+        prev = run(client, "grep -E '^BOT_OWNER_TELEGRAM_ID=' /etc/panel-search-bot.env 2>/dev/null || true")
+        m = re.search(r"^BOT_OWNER_TELEGRAM_ID=(\d+)\s*$", prev.strip(), re.M)
+        if m:
+            owner_keep = m.group(1)
+    except Exception:
+        pass
+    owner_new = os.environ.get("BOT_OWNER_TELEGRAM_ID", "").strip() or owner_keep
     env_body = f"TELEGRAM_BOT_TOKEN={TOKEN}\nBOT_DATA_DIR={REMOTE_DIR}/.bot-data\n"
+    if owner_new:
+        env_body += f"BOT_OWNER_TELEGRAM_ID={owner_new}\n"
     b64env = base64.b64encode(env_body.encode()).decode()
     run(
         client,
